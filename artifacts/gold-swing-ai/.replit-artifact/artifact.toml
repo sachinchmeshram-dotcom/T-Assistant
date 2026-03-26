@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Gold Swing AI Pro"
+version = "1.0.0"
+id = "artifacts/gold-swing-ai"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23885
+
+[services.development]
+run = "pnpm --filter @workspace/gold-swing-ai run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gold-swing-ai", "run", "build" ]
+publicDir = "artifacts/gold-swing-ai/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23885"
+BASE_PATH = "/"

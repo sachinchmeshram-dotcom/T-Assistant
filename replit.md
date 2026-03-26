@@ -21,7 +21,8 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 ```text
 artifacts-monorepo/
 ├── artifacts/              # Deployable applications
-│   └── api-server/         # Express API server
+│   ├── api-server/         # Express API server
+│   └── gold-swing-ai/      # Gold Swing AI Pro - React frontend
 ├── lib/                    # Shared libraries
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
 │   ├── api-client-react/   # Generated React Query hooks
@@ -34,6 +35,33 @@ artifacts-monorepo/
 ├── tsconfig.json           # Root TS project references
 └── package.json            # Root package with hoisted devDeps
 ```
+
+## Gold Swing AI Pro App
+
+A professional XAUUSD gold swing trading dashboard with:
+
+- **Live price feed** from Yahoo Finance (GC=F) with 30s refresh
+- **AI Signal Engine**: BUY/SELL/HOLD with confidence scoring (only shows if ≥65%)
+- **Multi-timeframe analysis**: 1D, 4H, 1H trend detection using EMA50/EMA200
+- **Technical indicators**: RSI(14), EMA20/50/200, MACD, ATR(14)
+- **Signal cooldown**: 30-minute cooldown, only fires new signal if opposite appears or price moves 0.5%
+- **Position Sizer**: lot size calculator from balance + risk %
+- **Signal History**: last 50 signals stored in DB
+- **TradingView chart** with 15m/1H/4H/1D timeframes
+
+### API Endpoints
+- `GET /api/price` - live XAUUSD price
+- `GET /api/signal` - AI-generated signal
+- `GET /api/history` - last 50 signals
+- `POST /api/position-size` - lot size calculator
+
+### Key Files
+- `artifacts/api-server/src/lib/goldPrice.ts` - price fetcher (Yahoo Finance)
+- `artifacts/api-server/src/lib/technicalIndicators.ts` - RSI, EMA, MACD, ATR
+- `artifacts/api-server/src/lib/signalEngine.ts` - AI signal generation logic
+- `artifacts/api-server/src/routes/trading.ts` - API route handlers
+- `artifacts/gold-swing-ai/src/pages/dashboard.tsx` - main dashboard page
+- `lib/db/src/schema/signals.ts` - signals DB table
 
 ## TypeScript & Composite Projects
 
@@ -56,11 +84,15 @@ Express 5 API server. Routes live in `src/routes/` and use `@workspace/api-zod` 
 
 - Entry: `src/index.ts` — reads `PORT`, starts Express
 - App setup: `src/app.ts` — mounts CORS, JSON/urlencoded parsing, routes at `/api`
-- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`)
+- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`); `src/routes/trading.ts` exposes gold trading endpoints
 - Depends on: `@workspace/db`, `@workspace/api-zod`
 - `pnpm --filter @workspace/api-server run dev` — run the dev server
 - `pnpm --filter @workspace/api-server run build` — production esbuild bundle (`dist/index.cjs`)
 - Build bundles an allowlist of deps (express, cors, pg, drizzle-orm, zod, etc.) and externalizes the rest
+
+### `artifacts/gold-swing-ai` (`@workspace/gold-swing-ai`)
+
+React + Vite frontend for Gold Swing AI Pro. Uses TanStack React Query for data fetching, Tailwind CSS for styling.
 
 ### `lib/db` (`@workspace/db`)
 
@@ -68,7 +100,7 @@ Database layer using Drizzle ORM with PostgreSQL. Exports a Drizzle client insta
 
 - `src/index.ts` — creates a `Pool` + Drizzle instance, exports schema
 - `src/schema/index.ts` — barrel re-export of all models
-- `src/schema/<modelname>.ts` — table definitions with `drizzle-zod` insert schemas (no models definitions exist right now)
+- `src/schema/signals.ts` — signals table with insert schemas
 - `drizzle.config.ts` — Drizzle Kit config (requires `DATABASE_URL`, automatically provided by Replit)
 - Exports: `.` (pool, db, schema), `./schema` (schema only)
 

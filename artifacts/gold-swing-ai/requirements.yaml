@@ -1,0 +1,15 @@
+packages:
+  "framer-motion": "For smooth layout transitions and panel entry animations"
+  "date-fns": "For formatting timestamps and countdowns"
+  "react-hook-form": "For robust position sizer form state and validation"
+  "@hookform/resolvers": "Zod resolver for the position sizer form"
+  "clsx": "Utility for conditionally joining classNames"
+  "tailwind-merge": "Utility to merge tailwind classes safely"
+  "lucide-react": "For UI icons in the trading terminal"
+
+images: []
+
+notes:
+  - "Using generated React Query hooks from @workspace/api-client-react"
+  - "TradingView iframe embedded for chart widget"
+  - "Polling intervals: 30s for price, 5m for signals/history"

@@ -3,13 +3,15 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Gold Swing AI Pro API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: trading
+    description: Gold trading operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,70 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /price:
+    get:
+      operationId: getPrice
+      tags: [trading]
+      summary: Get live XAUUSD price
+      description: Returns the current gold price
+      responses:
+        "200":
+          description: Current price
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceResponse"
+  /signal:
+    get:
+      operationId: getSignal
+      tags: [trading]
+      summary: Get AI trading signal
+      description: Returns AI-generated BUY/SELL/HOLD signal with confidence score and trade levels
+      responses:
+        "200":
+          description: AI trading signal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalResponse"
+  /history:
+    get:
+      operationId: getHistory
+      tags: [trading]
+      summary: Get signal history
+      description: Returns last 50 signals
+      responses:
+        "200":
+          description: Signal history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryResponse"
+  /position-size:
+    post:
+      operationId: calculatePositionSize
+      tags: [trading]
+      summary: Calculate lot size
+      description: Calculates position size based on account balance and risk percentage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PositionSizeRequest"
+      responses:
+        "200":
+          description: Position size calculation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionSizeResponse"
+        "400":
+          description: Invalid inputs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +99,213 @@ components:
           type: string
       required:
         - status
-
+    PriceResponse:
+      type: object
+      properties:
+        price:
+          type: number
+          description: Current XAUUSD price
+        change:
+          type: number
+          description: Price change from previous close
+        changePercent:
+          type: number
+          description: Price change percentage
+        high24h:
+          type: number
+          description: 24-hour high
+        low24h:
+          type: number
+          description: 24-hour low
+        timestamp:
+          type: string
+          description: ISO timestamp of price data
+      required:
+        - price
+        - change
+        - changePercent
+        - high24h
+        - low24h
+        - timestamp
+    SignalResponse:
+      type: object
+      properties:
+        signal:
+          type: string
+          enum: [BUY, SELL, HOLD]
+          description: AI trading signal
+        confidence:
+          type: number
+          description: Confidence score 0-100
+        entryPrice:
+          type: number
+          description: Recommended entry price
+        stopLoss:
+          type: number
+          description: Stop loss price
+        takeProfit:
+          type: number
+          description: Take profit price
+        trend:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+          description: Overall market trend
+        reason:
+          type: string
+          description: Human-readable reason for the signal
+        timestamp:
+          type: string
+          description: ISO timestamp of signal generation
+        tradeDuration:
+          type: string
+          description: Expected trade duration e.g. 1-3 days
+        cooldownRemaining:
+          type: number
+          description: Seconds remaining in cooldown period
+        indicators:
+          $ref: "#/components/schemas/Indicators"
+      required:
+        - signal
+        - confidence
+        - entryPrice
+        - stopLoss
+        - takeProfit
+        - trend
+        - reason
+        - timestamp
+        - tradeDuration
+        - cooldownRemaining
+        - indicators
+    Indicators:
+      type: object
+      properties:
+        rsi:
+          type: number
+          description: RSI 14 value
+        ema20:
+          type: number
+        ema50:
+          type: number
+        ema200:
+          type: number
+        macdLine:
+          type: number
+        macdSignal:
+          type: number
+        macdHistogram:
+          type: number
+        atr:
+          type: number
+          description: ATR value
+        trend1d:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+        trend4h:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+        trend1h:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+      required:
+        - rsi
+        - ema20
+        - ema50
+        - ema200
+        - macdLine
+        - macdSignal
+        - macdHistogram
+        - atr
+        - trend1d
+        - trend4h
+        - trend1h
+    HistoryResponse:
+      type: object
+      properties:
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryEntry"
+      required:
+        - signals
+    HistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        signal:
+          type: string
+          enum: [BUY, SELL, HOLD]
+        confidence:
+          type: number
+        entryPrice:
+          type: number
+        stopLoss:
+          type: number
+        takeProfit:
+          type: number
+        trend:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+        reason:
+          type: string
+        timestamp:
+          type: string
+        tradeDuration:
+          type: string
+      required:
+        - id
+        - signal
+        - confidence
+        - entryPrice
+        - stopLoss
+        - takeProfit
+        - trend
+        - reason
+        - timestamp
+        - tradeDuration
+    PositionSizeRequest:
+      type: object
+      properties:
+        balance:
+          type: number
+          description: Account balance in USD
+        riskPercent:
+          type: number
+          description: Risk percentage (e.g., 1 for 1%)
+        stopLossDistance:
+          type: number
+          description: Stop loss distance in USD (price difference)
+      required:
+        - balance
+        - riskPercent
+        - stopLossDistance
+    PositionSizeResponse:
+      type: object
+      properties:
+        lotSize:
+          type: number
+          description: Calculated lot size
+        riskAmount:
+          type: number
+          description: Risk amount in USD
+        positionValue:
+          type: number
+          description: Total position value in USD
+        pipValue:
+          type: number
+          description: Value per pip
+      required:
+        - lotSize
+        - riskAmount
+        - positionValue
+        - pipValue
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
