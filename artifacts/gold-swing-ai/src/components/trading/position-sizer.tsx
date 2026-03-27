@@ -28,13 +28,19 @@ export function PositionSizer() {
     },
   });
 
-  // Auto-fill SL distance when signal changes
+  // Auto-fill SL distance from signal AND auto-trigger calculation
   useEffect(() => {
-    if (signalData && signalData.signal !== 'HOLD') {
+    if (signalData) {
       const distance = Math.abs(signalData.entryPrice - signalData.stopLoss);
-      form.setValue('stopLossDistance', Number(distance.toFixed(2)));
+      const slDist = Number(distance.toFixed(2));
+      form.setValue('stopLossDistance', slDist);
+      // Auto-calculate with current balance and risk %
+      const { balance, riskPercent } = form.getValues();
+      if (balance > 0 && riskPercent > 0 && slDist > 0) {
+        mutate({ data: { balance, riskPercent, stopLossDistance: slDist } });
+      }
     }
-  }, [signalData, form]);
+  }, [signalData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSubmit = (values: FormValues) => {
     mutate({ data: values });
