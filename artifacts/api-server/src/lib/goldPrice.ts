@@ -142,6 +142,7 @@ export async function fetchOHLC(interval: string): Promise<OHLCCandle[]> {
   }
 
   const yahooIntervalMap: Record<string, { interval: string; range: string }> = {
+    "1m":  { interval: "1m",  range: "1d" },
     "5m":  { interval: "5m",  range: "2d" },
     "15m": { interval: "15m", range: "5d" },
     "1h":  { interval: "1h",  range: "30d" },
