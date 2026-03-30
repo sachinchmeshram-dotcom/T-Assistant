@@ -1,12 +1,123 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { fetchGoldPrice } from "../lib/goldPrice.js";
 import { generateSignal } from "../lib/signalEngine.js";
 import { db, signalsTable } from "@workspace/db";
 import { CalculatePositionSizeBody } from "@workspace/api-zod";
 import { desc } from "drizzle-orm";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
+// ── SSE price streaming ────────────────────────────────────────────────────
+const SPREAD = 0.35;          // XAUUSD typical spread in USD
+const STREAM_INTERVAL = 500;  // Push every 500ms for near-tick feel
+
+const sseClients = new Set<Response>();
+
+interface StreamPrice {
+  price: number;
+  bid: number;
+  ask: number;
+  spread: number;
+  change: number;
+  changePercent: number;
+  high24h: number;
+  low24h: number;
+  direction: "up" | "down" | "unchanged";
+  timestamp: string;
+  ms: number;
+}
+
+let lastStreamPrice: number | null = null;
+let lastRealPrice: StreamPrice | null = null;
+
+// Micro-simulation: adds tiny random tick between real price fetches
+function simulateTick(realPrice: StreamPrice): StreamPrice {
+  const micro = (Math.random() - 0.5) * 0.06; // ±$0.03 tick noise
+  const price = +(realPrice.price + micro).toFixed(2);
+  const direction: "up" | "down" | "unchanged" =
+    lastStreamPrice === null ? "unchanged"
+    : price > lastStreamPrice ? "up"
+    : price < lastStreamPrice ? "down"
+    : "unchanged";
+  lastStreamPrice = price;
+  return {
+    ...realPrice,
+    price,
+    bid:  +(price - SPREAD / 2).toFixed(2),
+    ask:  +(price + SPREAD / 2).toFixed(2),
+    direction,
+    timestamp: new Date().toISOString(),
+    ms: Date.now(),
+  };
+}
+
+async function broadcastPrice() {
+  if (sseClients.size === 0) return;
+
+  try {
+    const raw = await fetchGoldPrice();
+    const base: StreamPrice = {
+      price:         raw.price,
+      bid:           +(raw.price - SPREAD / 2).toFixed(2),
+      ask:           +(raw.price + SPREAD / 2).toFixed(2),
+      spread:        SPREAD,
+      change:        raw.change,
+      changePercent: raw.changePercent,
+      high24h:       raw.high24h,
+      low24h:        raw.low24h,
+      direction:     "unchanged",
+      timestamp:     raw.timestamp,
+      ms:            Date.now(),
+    };
+    lastRealPrice = base;
+  } catch (err) {
+    logger.warn({ err }, "SSE price fetch failed");
+  }
+
+  if (!lastRealPrice) return;
+
+  const tick = simulateTick(lastRealPrice);
+  const payload = `data: ${JSON.stringify(tick)}\n\n`;
+
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+// Start broadcaster immediately
+setInterval(broadcastPrice, STREAM_INTERVAL);
+
+router.get("/price/stream", (req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+  res.flushHeaders();
+
+  // Send initial ping
+  res.write(": connected\n\n");
+
+  sseClients.add(res);
+  logger.info({ total: sseClients.size }, "SSE client connected");
+
+  // If we have a recent price, send it immediately
+  if (lastRealPrice) {
+    const tick = simulateTick(lastRealPrice);
+    res.write(`data: ${JSON.stringify(tick)}\n\n`);
+  }
+
+  req.on("close", () => {
+    sseClients.delete(res);
+    logger.info({ total: sseClients.size }, "SSE client disconnected");
+  });
+});
+
+// ── REST price endpoint (still available as fallback) ─────────────────────
 router.get("/price", async (req, res) => {
   try {
     const priceData = await fetchGoldPrice();

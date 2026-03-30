@@ -19,7 +19,7 @@ export interface OHLCCandle {
 
 let cachedPrice: PriceData | null = null;
 let lastPriceFetch = 0;
-const PRICE_CACHE_TTL = 5_000; // 5 seconds — near real-time
+const PRICE_CACHE_TTL = 1_000; // 1 second — near real-time for SSE
 
 export async function fetchGoldPrice(): Promise<PriceData> {
   const now = Date.now();
