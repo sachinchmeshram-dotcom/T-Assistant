@@ -180,7 +180,7 @@ export function useGetPrice<
 }
 
 /**
- * Returns AI-generated BUY/SELL/HOLD signal with confidence score and trade levels
+ * Returns AI-generated LONG/SHORT/HOLD signal with confidence score and intraday trade levels
  * @summary Get AI trading signal
  */
 export const getGetSignalUrl = () => {

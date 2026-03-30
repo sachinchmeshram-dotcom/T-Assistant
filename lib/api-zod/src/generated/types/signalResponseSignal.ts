@@ -13,7 +13,7 @@ export type SignalResponseSignal =
   (typeof SignalResponseSignal)[keyof typeof SignalResponseSignal];
 
 export const SignalResponseSignal = {
-  BUY: "BUY",
-  SELL: "SELL",
+  LONG: "LONG",
+  SHORT: "SHORT",
   HOLD: "HOLD",
 } as const;

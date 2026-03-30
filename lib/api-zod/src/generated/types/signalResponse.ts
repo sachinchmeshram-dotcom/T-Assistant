@@ -26,7 +26,7 @@ export interface SignalResponse {
   reason: string;
   /** ISO timestamp of signal generation */
   timestamp: string;
-  /** Expected trade duration e.g. 1-3 days */
+  /** Expected trade duration e.g. 2-6 hours */
   tradeDuration: string;
   /** Seconds remaining in cooldown period */
   cooldownRemaining: number;

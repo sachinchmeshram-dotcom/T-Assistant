@@ -56,7 +56,7 @@ router.get("/history", async (req, res) => {
 
     const signals = rows.map(r => ({
       id: String(r.id),
-      signal: r.signal as "BUY" | "SELL" | "HOLD",
+      signal: r.signal as "LONG" | "SHORT" | "HOLD",
       confidence: r.confidence,
       entryPrice: r.entryPrice,
       stopLoss: r.stopLoss,

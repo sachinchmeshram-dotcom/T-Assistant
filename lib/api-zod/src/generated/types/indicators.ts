@@ -5,9 +5,9 @@
  * Gold Swing AI Pro API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { IndicatorsTrend1d } from "./indicatorsTrend1d";
+import type { IndicatorsTrend15m } from "./indicatorsTrend15m";
 import type { IndicatorsTrend1h } from "./indicatorsTrend1h";
-import type { IndicatorsTrend4h } from "./indicatorsTrend4h";
+import type { IndicatorsTrend5m } from "./indicatorsTrend5m";
 
 export interface Indicators {
   /** RSI 14 value */
@@ -20,7 +20,7 @@ export interface Indicators {
   macdHistogram: number;
   /** ATR value */
   atr: number;
-  trend1d: IndicatorsTrend1d;
-  trend4h: IndicatorsTrend4h;
   trend1h: IndicatorsTrend1h;
+  trend15m: IndicatorsTrend15m;
+  trend5m: IndicatorsTrend5m;
 }

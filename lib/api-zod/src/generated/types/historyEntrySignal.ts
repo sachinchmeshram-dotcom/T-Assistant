@@ -10,7 +10,7 @@ export type HistoryEntrySignal =
   (typeof HistoryEntrySignal)[keyof typeof HistoryEntrySignal];
 
 export const HistoryEntrySignal = {
-  BUY: "BUY",
-  SELL: "SELL",
+  LONG: "LONG",
+  SHORT: "SHORT",
   HOLD: "HOLD",
 } as const;

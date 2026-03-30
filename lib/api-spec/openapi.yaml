@@ -44,7 +44,7 @@ paths:
       operationId: getSignal
       tags: [trading]
       summary: Get AI trading signal
-      description: Returns AI-generated BUY/SELL/HOLD signal with confidence score and trade levels
+      description: Returns AI-generated LONG/SHORT/HOLD signal with confidence score and intraday trade levels
       responses:
         "200":
           description: AI trading signal
@@ -132,7 +132,7 @@ components:
       properties:
         signal:
           type: string
-          enum: [BUY, SELL, HOLD]
+          enum: [LONG, SHORT, HOLD]
           description: AI trading signal
         confidence:
           type: number
@@ -158,7 +158,7 @@ components:
           description: ISO timestamp of signal generation
         tradeDuration:
           type: string
-          description: Expected trade duration e.g. 1-3 days
+          description: Expected trade duration e.g. 2-6 hours
         cooldownRemaining:
           type: number
           description: Seconds remaining in cooldown period
@@ -197,13 +197,13 @@ components:
         atr:
           type: number
           description: ATR value
-        trend1d:
-          type: string
-          enum: [BULLISH, BEARISH, NEUTRAL]
-        trend4h:
-          type: string
-          enum: [BULLISH, BEARISH, NEUTRAL]
         trend1h:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+        trend15m:
+          type: string
+          enum: [BULLISH, BEARISH, NEUTRAL]
+        trend5m:
           type: string
           enum: [BULLISH, BEARISH, NEUTRAL]
       required:
@@ -215,9 +215,9 @@ components:
         - macdSignal
         - macdHistogram
         - atr
-        - trend1d
-        - trend4h
         - trend1h
+        - trend15m
+        - trend5m
     HistoryResponse:
       type: object
       properties:
@@ -234,7 +234,7 @@ components:
           type: string
         signal:
           type: string
-          enum: [BUY, SELL, HOLD]
+          enum: [LONG, SHORT, HOLD]
         confidence:
           type: number
         entryPrice:

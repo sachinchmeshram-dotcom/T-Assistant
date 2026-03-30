@@ -29,11 +29,11 @@ export const GetPriceResponse = zod.object({
 });
 
 /**
- * Returns AI-generated BUY/SELL/HOLD signal with confidence score and trade levels
+ * Returns AI-generated LONG/SHORT/HOLD signal with confidence score and intraday trade levels
  * @summary Get AI trading signal
  */
 export const GetSignalResponse = zod.object({
-  signal: zod.enum(["BUY", "SELL", "HOLD"]).describe("AI trading signal"),
+  signal: zod.enum(["LONG", "SHORT", "HOLD"]).describe("AI trading signal"),
   confidence: zod.number().describe("Confidence score 0-100"),
   entryPrice: zod.number().describe("Recommended entry price"),
   stopLoss: zod.number().describe("Stop loss price"),
@@ -43,7 +43,9 @@ export const GetSignalResponse = zod.object({
     .describe("Overall market trend"),
   reason: zod.string().describe("Human-readable reason for the signal"),
   timestamp: zod.string().describe("ISO timestamp of signal generation"),
-  tradeDuration: zod.string().describe("Expected trade duration e.g. 1-3 days"),
+  tradeDuration: zod
+    .string()
+    .describe("Expected trade duration e.g. 2-6 hours"),
   cooldownRemaining: zod
     .number()
     .describe("Seconds remaining in cooldown period"),
@@ -56,9 +58,9 @@ export const GetSignalResponse = zod.object({
     macdSignal: zod.number(),
     macdHistogram: zod.number(),
     atr: zod.number().describe("ATR value"),
-    trend1d: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
-    trend4h: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
     trend1h: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
+    trend15m: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
+    trend5m: zod.enum(["BULLISH", "BEARISH", "NEUTRAL"]),
   }),
 });
 
@@ -70,7 +72,7 @@ export const GetHistoryResponse = zod.object({
   signals: zod.array(
     zod.object({
       id: zod.string(),
-      signal: zod.enum(["BUY", "SELL", "HOLD"]),
+      signal: zod.enum(["LONG", "SHORT", "HOLD"]),
       confidence: zod.number(),
       entryPrice: zod.number(),
       stopLoss: zod.number(),

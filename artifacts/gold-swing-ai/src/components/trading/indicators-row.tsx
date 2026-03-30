@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function IndicatorsRow() {
   const { data: signalData, isLoading } = useGetSignal({
-    query: { refetchInterval: 300000 }
+    query: { refetchInterval: 120000 }
   });
 
   if (isLoading) {
@@ -24,22 +24,35 @@ export function IndicatorsRow() {
   const statCards = [
     { 
       label: "RSI (14)", 
+      sublabel: "15m",
       value: indicators.rsi.toFixed(2),
       color: indicators.rsi > 60 ? "text-success" : indicators.rsi < 40 ? "text-destructive" : "text-foreground"
     },
     { 
-      label: "MACD", 
+      label: "MACD",
+      sublabel: "15m",
       value: indicators.macdHistogram > 0 ? "BULLISH" : "BEARISH",
       color: indicators.macdHistogram > 0 ? "text-success" : "text-destructive"
     },
-    { label: "ATR", value: indicators.atr.toFixed(2), color: "text-foreground" },
+    { label: "ATR", sublabel: "15m", value: indicators.atr.toFixed(2), color: "text-foreground" },
     { 
-      label: "EMA 20", 
-      value: indicators.ema20.toFixed(2), 
+      label: "EMA 20/50", 
+      sublabel: "15m",
+      value: indicators.ema20 > indicators.ema50 ? "BULLISH" : "BEARISH", 
       color: indicators.ema20 > indicators.ema50 ? "text-success" : "text-destructive" 
     },
-    { label: "EMA 50", value: indicators.ema50.toFixed(2), color: "text-foreground" },
-    { label: "EMA 200", value: indicators.ema200.toFixed(2), color: "text-primary" },
+    { 
+      label: "Trend 1H",
+      sublabel: "bias",
+      value: indicators.trend1h,
+      color: indicators.trend1h === "BULLISH" ? "text-success" : indicators.trend1h === "BEARISH" ? "text-destructive" : "text-muted-foreground"
+    },
+    { 
+      label: "Trend 15m",
+      sublabel: "entry",
+      value: indicators.trend15m,
+      color: indicators.trend15m === "BULLISH" ? "text-success" : indicators.trend15m === "BEARISH" ? "text-destructive" : "text-muted-foreground"
+    },
   ];
 
   return (
@@ -47,8 +60,11 @@ export function IndicatorsRow() {
       {statCards.map((stat, i) => (
         <Card key={i} className="bg-black/20 border-white/5 overflow-hidden hover:bg-white/5 transition-colors duration-300">
           <div className="p-4 flex flex-col items-center justify-center text-center h-full">
-            <span className="text-xs text-muted-foreground font-medium mb-1">{stat.label}</span>
-            <span className={`text-lg font-bold font-mono tracking-tight ${stat.color}`}>
+            <span className="text-xs text-muted-foreground font-medium mb-0.5">{stat.label}</span>
+            {stat.sublabel && (
+              <span className="text-[10px] text-muted-foreground/50 mb-1 font-mono">{stat.sublabel}</span>
+            )}
+            <span className={`text-sm font-bold font-mono tracking-tight ${stat.color}`}>
               {stat.value}
             </span>
           </div>

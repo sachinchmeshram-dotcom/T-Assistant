@@ -56,8 +56,8 @@ export function HistoryTable() {
                     </td>
                     <td className="px-6 py-4">
                       <Badge variant={
-                        row.signal === 'BUY' ? 'success' : 
-                        row.signal === 'SELL' ? 'destructive' : 'warning'
+                        row.signal === 'LONG' ? 'success' : 
+                        row.signal === 'SHORT' ? 'destructive' : 'warning'
                       }>
                         {row.signal}
                       </Badge>

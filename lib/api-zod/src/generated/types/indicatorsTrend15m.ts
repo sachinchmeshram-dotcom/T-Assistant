@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type IndicatorsTrend4h =
-  (typeof IndicatorsTrend4h)[keyof typeof IndicatorsTrend4h];
+export type IndicatorsTrend15m =
+  (typeof IndicatorsTrend15m)[keyof typeof IndicatorsTrend15m];
 
-export const IndicatorsTrend4h = {
+export const IndicatorsTrend15m = {
   BULLISH: "BULLISH",
   BEARISH: "BEARISH",
   NEUTRAL: "NEUTRAL",

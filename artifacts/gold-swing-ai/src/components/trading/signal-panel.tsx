@@ -43,8 +43,8 @@ export function SignalPanel() {
   const { signal, confidence, entryPrice, stopLoss, takeProfit, trend, reason, timestamp, tradeDuration, cooldownRemaining } = signalData;
 
   const signalColors = {
-    BUY: "bg-success text-success-foreground shadow-[0_0_30px_rgba(34,197,94,0.3)] border-success/50",
-    SELL: "bg-destructive text-destructive-foreground shadow-[0_0_30px_rgba(239,68,68,0.3)] border-destructive/50",
+    LONG: "bg-success text-success-foreground shadow-[0_0_30px_rgba(34,197,94,0.3)] border-success/50",
+    SHORT: "bg-destructive text-destructive-foreground shadow-[0_0_30px_rgba(239,68,68,0.3)] border-destructive/50",
     HOLD: "bg-warning text-warning-foreground shadow-[0_0_30px_rgba(234,179,8,0.3)] border-warning/50",
   };
 
@@ -55,7 +55,7 @@ export function SignalPanel() {
     <Card className="relative overflow-hidden border-white/10 bg-gradient-to-b from-card to-background shadow-2xl">
       {/* Decorative background glow based on signal */}
       <div className={`absolute -top-24 -right-24 w-64 h-64 rounded-full blur-3xl opacity-10 pointer-events-none
-        ${signal === 'BUY' ? 'bg-success' : signal === 'SELL' ? 'bg-destructive' : 'bg-warning'}
+        ${signal === 'LONG' ? 'bg-success' : signal === 'SHORT' ? 'bg-destructive' : 'bg-warning'}
       `} />
 
       <CardContent className="p-6 lg:p-8 flex flex-col gap-8 relative z-10">
@@ -82,7 +82,7 @@ export function SignalPanel() {
             </div>
             <div className="w-full md:w-48 h-2 bg-black/40 rounded-full overflow-hidden border border-white/5">
               <motion.div 
-                className={`h-full rounded-full ${signal === 'HOLD' ? 'bg-warning' : 'bg-primary'}`}
+                className={`h-full rounded-full ${signal === 'HOLD' ? 'bg-warning' : signal === 'LONG' ? 'bg-success' : 'bg-destructive'}`}
                 initial={{ width: 0 }}
                 animate={{ width: `${confidence}%` }}
                 transition={{ duration: 1, ease: "easeOut" }}
@@ -108,7 +108,7 @@ export function SignalPanel() {
               </div>
             </div>
             <div>
-              <span className="text-xs text-muted-foreground block mb-1">Expected Duration</span>
+              <span className="text-xs text-muted-foreground block mb-1">Target Duration</span>
               <div className="font-semibold text-sm text-foreground">
                 {tradeDuration}
               </div>

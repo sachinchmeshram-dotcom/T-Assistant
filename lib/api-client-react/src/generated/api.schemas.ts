@@ -31,8 +31,8 @@ export type SignalResponseSignal =
   (typeof SignalResponseSignal)[keyof typeof SignalResponseSignal];
 
 export const SignalResponseSignal = {
-  BUY: "BUY",
-  SELL: "SELL",
+  LONG: "LONG",
+  SHORT: "SHORT",
   HOLD: "HOLD",
 } as const;
 
@@ -48,28 +48,28 @@ export const SignalResponseTrend = {
   NEUTRAL: "NEUTRAL",
 } as const;
 
-export type IndicatorsTrend1d =
-  (typeof IndicatorsTrend1d)[keyof typeof IndicatorsTrend1d];
-
-export const IndicatorsTrend1d = {
-  BULLISH: "BULLISH",
-  BEARISH: "BEARISH",
-  NEUTRAL: "NEUTRAL",
-} as const;
-
-export type IndicatorsTrend4h =
-  (typeof IndicatorsTrend4h)[keyof typeof IndicatorsTrend4h];
-
-export const IndicatorsTrend4h = {
-  BULLISH: "BULLISH",
-  BEARISH: "BEARISH",
-  NEUTRAL: "NEUTRAL",
-} as const;
-
 export type IndicatorsTrend1h =
   (typeof IndicatorsTrend1h)[keyof typeof IndicatorsTrend1h];
 
 export const IndicatorsTrend1h = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type IndicatorsTrend15m =
+  (typeof IndicatorsTrend15m)[keyof typeof IndicatorsTrend15m];
+
+export const IndicatorsTrend15m = {
+  BULLISH: "BULLISH",
+  BEARISH: "BEARISH",
+  NEUTRAL: "NEUTRAL",
+} as const;
+
+export type IndicatorsTrend5m =
+  (typeof IndicatorsTrend5m)[keyof typeof IndicatorsTrend5m];
+
+export const IndicatorsTrend5m = {
   BULLISH: "BULLISH",
   BEARISH: "BEARISH",
   NEUTRAL: "NEUTRAL",
@@ -86,9 +86,9 @@ export interface Indicators {
   macdHistogram: number;
   /** ATR value */
   atr: number;
-  trend1d: IndicatorsTrend1d;
-  trend4h: IndicatorsTrend4h;
   trend1h: IndicatorsTrend1h;
+  trend15m: IndicatorsTrend15m;
+  trend5m: IndicatorsTrend5m;
 }
 
 export interface SignalResponse {
@@ -108,7 +108,7 @@ export interface SignalResponse {
   reason: string;
   /** ISO timestamp of signal generation */
   timestamp: string;
-  /** Expected trade duration e.g. 1-3 days */
+  /** Expected trade duration e.g. 2-6 hours */
   tradeDuration: string;
   /** Seconds remaining in cooldown period */
   cooldownRemaining: number;
@@ -119,8 +119,8 @@ export type HistoryEntrySignal =
   (typeof HistoryEntrySignal)[keyof typeof HistoryEntrySignal];
 
 export const HistoryEntrySignal = {
-  BUY: "BUY",
-  SELL: "SELL",
+  LONG: "LONG",
+  SHORT: "SHORT",
   HOLD: "HOLD",
 } as const;
 
