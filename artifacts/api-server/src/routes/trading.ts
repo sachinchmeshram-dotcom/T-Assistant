@@ -7,7 +7,6 @@ import { priceEmitter, getLatestPrice, type LivePrice } from "../lib/priceEvents
 import { broadcastToWebSocketClients } from "../lib/priceWebSocket.js";
 import { initLSTM, captureSequenceForTrade } from "../lib/lstmModel.js";
 import { db, signalsTable } from "@workspace/db";
-import { CalculatePositionSizeBody } from "@workspace/api-zod";
 import { desc } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 
@@ -171,47 +170,5 @@ router.post("/analytics/smart-mode", async (req, res) => {
   res.json(analytics);
 });
 
-// ── Position sizer ─────────────────────────────────────────────────────────
-router.post("/position-size", (req, res) => {
-  const parseResult = CalculatePositionSizeBody.safeParse(req.body);
-  if (!parseResult.success) {
-    res.status(400).json({
-      error: "validation_error",
-      message: "Invalid inputs: " + parseResult.error.issues.map(i => i.message).join(", "),
-    });
-    return;
-  }
-
-  const { balance, riskPercent, stopLossDistance } = parseResult.data;
-
-  if (balance <= 0) {
-    res.status(400).json({ error: "invalid_balance", message: "Balance must be greater than 0" });
-    return;
-  }
-  if (riskPercent < 0.1 || riskPercent > 10) {
-    res.status(400).json({ error: "invalid_risk", message: "Risk % must be between 0.1 and 10" });
-    return;
-  }
-  if (stopLossDistance <= 0) {
-    res.status(400).json({ error: "invalid_sl", message: "Stop loss distance must be greater than 0" });
-    return;
-  }
-
-  const riskAmount = balance * (riskPercent / 100);
-  const contractSize = 100;
-  const pipValue = contractSize;
-  let lotSize = riskAmount / (stopLossDistance * pipValue);
-  lotSize = Math.max(0.01, Math.min(lotSize, 100));
-  lotSize = Math.round(lotSize * 100) / 100;
-
-  const positionValue = lotSize * contractSize * (stopLossDistance + 1);
-
-  res.json({
-    lotSize,
-    riskAmount: +riskAmount.toFixed(2),
-    positionValue: +positionValue.toFixed(2),
-    pipValue,
-  });
-});
 
 export default router;
