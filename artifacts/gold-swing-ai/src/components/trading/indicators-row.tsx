@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export function IndicatorsRow() {
   const { data: signalData, isLoading } = useGetSignal({
-    query: { refetchInterval: 60000 }
+    query: { refetchInterval: 300000 }
   });
 
   if (isLoading) {
@@ -21,13 +21,13 @@ export function IndicatorsRow() {
 
   const { indicators } = signalData;
 
-  // trend1h / trend15m / trend5m fields now carry scalping TF data:
-  // trend1h  → 15m context
-  // trend15m → 5m confirmation
-  // trend5m  → 1m entry
-  const ctx15m  = indicators.trend1h;
-  const conf5m  = indicators.trend15m;
-  const entry1m = indicators.trend5m;
+  // Intraday TF mapping (values live in the legacy-named fields):
+  // indicators.trend1h  → 4H context trend
+  // indicators.trend15m → 1H confirmation trend
+  // indicators.trend5m  → 15m entry trend
+  const trend4h  = indicators.trend1h;
+  const trend1h  = indicators.trend15m;
+  const trend15m = indicators.trend5m;
 
   const trendColor = (t: string) =>
     t === "BULLISH" ? "text-success" : t === "BEARISH" ? "text-destructive" : "text-muted-foreground";
@@ -35,39 +35,39 @@ export function IndicatorsRow() {
   const statCards = [
     {
       label: "RSI (14)",
-      sublabel: "5m",
+      sublabel: "1H",
       value: indicators.rsi.toFixed(2),
       color: indicators.rsi > 65 ? "text-destructive" : indicators.rsi < 35 ? "text-success" : "text-foreground",
     },
     {
       label: "MACD",
-      sublabel: "5m",
+      sublabel: "1H",
       value: indicators.macdHistogram > 0 ? "BULLISH" : "BEARISH",
       color: indicators.macdHistogram > 0 ? "text-success" : "text-destructive",
     },
     {
       label: "ATR",
-      sublabel: "1m",
+      sublabel: "1H",
       value: indicators.atr.toFixed(2),
       color: "text-foreground",
     },
     {
-      label: "EMA 9/21",
-      sublabel: "1m entry",
+      label: "EMA 20/50",
+      sublabel: "1H bias",
       value: indicators.ema20 > indicators.ema50 ? "BULLISH" : "BEARISH",
       color: indicators.ema20 > indicators.ema50 ? "text-success" : "text-destructive",
     },
     {
-      label: "15m Trend",
+      label: "4H Trend",
       sublabel: "context",
-      value: ctx15m,
-      color: trendColor(ctx15m),
+      value: trend4h,
+      color: trendColor(trend4h),
     },
     {
-      label: "5m Trend",
+      label: "1H Trend",
       sublabel: "confirm",
-      value: conf5m,
-      color: trendColor(conf5m),
+      value: trend1h,
+      color: trendColor(trend1h),
     },
   ];
 

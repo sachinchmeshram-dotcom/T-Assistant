@@ -36,20 +36,24 @@ artifacts-monorepo/
 └── package.json            # Root package with hoisted devDeps
 ```
 
-## Gold Swing AI Pro App
+## Gold Intraday AI App
 
-A professional XAUUSD gold scalping dashboard with:
+A professional XAUUSD gold **intraday trading** dashboard with:
 
 - **Live price feed** via Finnhub WebSocket (`OANDA:XAU_USD`), goldprice.org as gap-filler
-- **Candlestick tick chart** (lightweight-charts v5) + TradingView OHLC chart
-- **SMC Signal Engine**: Smart Money Concepts (market structure HH/HL/LH/LL, BOS, liquidity sweeps, order blocks)
+- **1H OHLC TradingView chart** (default) + Live Tick Chart tab
+- **SMC Signal Engine**: Smart Money Concepts on 1H/4H candles (market structure, BOS, liquidity sweeps, order blocks)
+- **Session awareness**: London / New York / Asian detection; Asian session raises confidence thresholds (low liquidity)
+- **Daily Pivot Points**: R2/R1/PP/S1/S2 from previous day's OHLC, displayed in signal panel
 - **Self-learning analytics**: per-condition win rate tracking, adaptive weights (±8 pts), Smart Mode
-- **Pure-TS Neural Network**: 6→24→12→3 dense net trained on completed trade outcomes (Adam optimizer), runs entirely in Node.js with zero native dependencies; saves/loads weights from `/tmp/gold-ai-model.json`
-  - Min 20 closed trades to train; retrains every 50 new trades
-  - ML drives signal at ≥65% confidence; SMC fallback when untrained/low-confidence
-- **Technical indicators**: RSI(14), EMA9/21/50/200, MACD, ATR(1m)
-- **Multi-timeframe trend**: 1H/15m/5m
-- **Signal cooldown**: 5-min scalping cooldown
+- **Pure-TS LSTM Neural Network**: trained on 1H candle sequences from completed trade outcomes
+  - Min 15 closed trades to train; retrains every 30 new trades
+  - LSTM drives signal at ≥65% confidence; SMC fallback when untrained
+- **Technical indicators**: RSI(14), EMA20/50/200, MACD, ATR — all on 1H candles
+- **Multi-timeframe trend**: 4H context / 1H confirmation / 15m entry refinement
+- **Signal cooldown**: 4-hour intraday cooldown (was 5-min for scalping)
+- **SL/TP**: ATR×1.5 (min $8) for SL, 2.5× SL for TP — wider intraday distances
+- **Trade duration**: "2-8 hours" (was "5-15 minutes")
 - **Signal History + Trade Tracker**: auto-closes trades on TP/SL hit, tracks P&L
 
 ### Neural Network (`artifacts/api-server/src/lib/mlModel.ts`)

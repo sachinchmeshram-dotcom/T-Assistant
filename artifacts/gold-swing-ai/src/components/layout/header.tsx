@@ -70,7 +70,7 @@ export function Header() {
               <Activity className="text-black w-5 h-5" />
             </div>
             <div className="hidden sm:block">
-              <h1 className="text-base font-bold tracking-tight text-foreground leading-none">Gold Swing AI Pro</h1>
+              <h1 className="text-base font-bold tracking-tight text-foreground leading-none">Gold Intraday AI</h1>
               <div className="flex items-center gap-1.5 mt-1">
                 <span
                   className="w-2 h-2 rounded-full transition-colors duration-200"

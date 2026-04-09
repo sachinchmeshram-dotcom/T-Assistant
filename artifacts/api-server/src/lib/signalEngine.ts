@@ -22,6 +22,21 @@ export interface OrderBlockInfo {
   low: number;
 }
 
+export interface SessionInfo {
+  london: boolean;
+  newYork: boolean;
+  asian: boolean;
+  active: string;
+}
+
+export interface PivotPoints {
+  pivot: number;
+  r1: number;
+  r2: number;
+  s1: number;
+  s2: number;
+}
+
 export interface SignalResult {
   signal: "LONG" | "SHORT" | "HOLD";
   confidence: number;
@@ -34,11 +49,13 @@ export interface SignalResult {
   tradeDuration: string;
   cooldownRemaining: number;
   smartMode: boolean;
+  session: SessionInfo;
+  pivots: PivotPoints | null;
   // ── Hybrid AI fields ──────────────────────────────────────────────────────
   smcSignal:       "LONG" | "SHORT" | "HOLD";
-  smcConfidence:   number;                      // raw SMC score 0-100
-  signalStrength:  "STRONG" | "NORMAL" | null;  // STRONG=both agree, NORMAL=SMC solo ≥80
-  hybridConfidence: number;                     // 60% SMC + 40% ML
+  smcConfidence:   number;
+  signalStrength:  "STRONG" | "NORMAL" | null;
+  hybridConfidence: number;
   // ── Smart Money Concept fields ────────────────────────────────────────────
   marketStructure: "UPTREND" | "DOWNTREND" | "RANGING";
   bos: boolean;
@@ -57,6 +74,10 @@ export interface SignalResult {
     macdSignal: number;
     macdHistogram: number;
     atr: number;
+    // Intraday timeframes — stored in these fields:
+    // trend1h  → 4H trend  (highest context)
+    // trend15m → 1H trend  (confirmation)
+    // trend5m  → 15m trend (entry refinement)
     trend1h:  "BULLISH" | "BEARISH" | "NEUTRAL";
     trend15m: "BULLISH" | "BEARISH" | "NEUTRAL";
     trend5m:  "BULLISH" | "BEARISH" | "NEUTRAL";
@@ -83,18 +104,52 @@ let lastSignalState: LastSignalState | null = null;
 let cachedSignal: SignalResult | null = null;
 let lastSignalTime = 0;
 
-const SIGNAL_CACHE_TTL   = 60_000;
-const COOLDOWN_MS        = 300_000;
-const MIN_PRICE_MOVE_PCT = 0.001;
+// ── Intraday constants ────────────────────────────────────────────────────
+const SIGNAL_CACHE_TTL   = 300_000;   // 5 minutes — intraday signals are stable
+const COOLDOWN_MS        = 14_400_000; // 4 hours cooldown between signals
+const MIN_PRICE_MOVE_PCT = 0.004;      // 0.4% price move to override cooldown
 
 // ── SMC confidence thresholds ─────────────────────────────────────────────
-// STRONG = SMC + ML agree  → SMC needs to be ≥ this
 const SMC_AGREE_THRESHOLD   = 60;
-// NORMAL = SMC alone        → SMC needs to be ≥ this
 const SMC_SOLO_THRESHOLD    = 80;
-// Ranging market raises both thresholds (sideways suppression)
 const RANGING_AGREE_EXTRA   = 10;
 const RANGING_SOLO_EXTRA    = 8;
+// Asian session = lower liquidity → raise thresholds
+const ASIAN_AGREE_EXTRA     = 15;
+const ASIAN_SOLO_EXTRA      = 12;
+
+// ── Session detection ─────────────────────────────────────────────────────
+function getCurrentSession(): SessionInfo {
+  const h = new Date().getUTCHours();
+  const london  = h >= 7  && h < 17;   // 07:00–17:00 UTC
+  const newYork = h >= 13 && h < 22;   // 13:00–22:00 UTC
+  const asian   = h >= 22 || h < 7;    // 22:00–07:00 UTC
+
+  const active =
+    london && newYork ? "London / New York" :
+    london            ? "London" :
+    newYork           ? "New York" :
+    asian             ? "Asian" :
+    "Off-hours";
+
+  return { london, newYork, asian, active };
+}
+
+// ── Daily pivot points from the previous candle ───────────────────────────
+function calcPivotPoints(high: number, low: number, close: number): PivotPoints {
+  const pivot = (high + low + close) / 3;
+  const r1 = 2 * pivot - low;
+  const r2 = pivot + (high - low);
+  const s1 = 2 * pivot - high;
+  const s2 = pivot - (high - low);
+  return {
+    pivot: +pivot.toFixed(2),
+    r1:    +r1.toFixed(2),
+    r2:    +r2.toFixed(2),
+    s1:    +s1.toFixed(2),
+    s2:    +s2.toFixed(2),
+  };
+}
 
 // ── SMC Confidence Scoring using adaptive weights ─────────────────────────
 function calcSmcConfidence(opts: {
@@ -118,6 +173,7 @@ function calcSmcConfidence(opts: {
   if (liquiditySweep)   score += w.liquidity;
   if (inOrderBlock)     score += w.orderBlock;
 
+  // Intraday RSI zones: wider mid-range acceptable
   const rsiOk = signal === "LONG"
     ? rsi >= 30 && rsi <= 65
     : rsi >= 35 && rsi <= 70;
@@ -131,12 +187,12 @@ function calcSmcConfidence(opts: {
 }
 
 function overallTrend(
-  t15: string, t5: string, t1: string
+  t4h: string, t1h: string, t15: string
 ): "BULLISH" | "BEARISH" | "NEUTRAL" {
   const score =
-    (t15 === "BULLISH" ? 1 : t15 === "BEARISH" ? -1 : 0) +
-    (t5  === "BULLISH" ? 1 : t5  === "BEARISH" ? -1 : 0) +
-    (t1  === "BULLISH" ? 1 : t1  === "BEARISH" ? -1 : 0);
+    (t4h  === "BULLISH" ? 1 : t4h  === "BEARISH" ? -1 : 0) +
+    (t1h  === "BULLISH" ? 1 : t1h  === "BEARISH" ? -1 : 0) +
+    (t15  === "BULLISH" ? 1 : t15  === "BEARISH" ? -1 : 0);
   if (score >= 2) return "BULLISH";
   if (score <= -2) return "BEARISH";
   return "NEUTRAL";
@@ -156,19 +212,25 @@ function hybridDecide(opts: {
   shortConf:   number;
   mlPred:      LSTMPrediction;
   isRanging:   boolean;
+  isAsian:     boolean;
   smartMode:   boolean;
   winRate:     number;
   sufficientData: boolean;
 }): HybridDecision {
-  const { longConf, shortConf, mlPred, isRanging, smartMode, winRate, sufficientData } = opts;
+  const { longConf, shortConf, mlPred, isRanging, isAsian, smartMode, winRate, sufficientData } = opts;
 
-  // Dynamic thresholds
   let agreeThreshold = SMC_AGREE_THRESHOLD;
   let soloThreshold  = SMC_SOLO_THRESHOLD;
 
   if (isRanging) {
     agreeThreshold += RANGING_AGREE_EXTRA;
     soloThreshold  += RANGING_SOLO_EXTRA;
+  }
+
+  // Asian session: require higher conviction (thin liquidity)
+  if (isAsian) {
+    agreeThreshold += ASIAN_AGREE_EXTRA;
+    soloThreshold  += ASIAN_SOLO_EXTRA;
   }
 
   if (smartMode && sufficientData) {
@@ -181,7 +243,6 @@ function hybridDecide(opts: {
     }
   }
 
-  // 1. Determine raw SMC signal
   const smcSignal: "LONG" | "SHORT" | "HOLD" =
     longConf  >= agreeThreshold && longConf  > shortConf + 5 ? "LONG"  :
     shortConf >= agreeThreshold && shortConf > longConf  + 5 ? "SHORT" :
@@ -191,17 +252,14 @@ function hybridDecide(opts: {
                         : smcSignal === "SHORT" ? shortConf
                         : Math.max(longConf, shortConf);
 
-  // 2. ML signal (only trust when model is trained)
   const mlTrained = mlPred.modelStatus === "trained";
   const effectiveMlSignal = mlTrained ? mlPred.signal : "NO_TRADE";
 
-  // 3. Agreement check
   const agreed =
     smcSignal !== "HOLD" &&
     effectiveMlSignal !== "NO_TRADE" &&
     smcSignal === effectiveMlSignal;
 
-  // 4. Strength determination
   let signalStrength: "STRONG" | "NORMAL" | null = null;
 
   if (agreed && longConf >= agreeThreshold || agreed && shortConf >= agreeThreshold) {
@@ -213,7 +271,6 @@ function hybridDecide(opts: {
   const finalSignal: "LONG" | "SHORT" | "HOLD" =
     signalStrength !== null ? smcSignal : "HOLD";
 
-  // 5. Hybrid confidence = 60% SMC + 40% ML (direction-specific ML prob)
   const mlProbForDir =
     finalSignal === "LONG"  ? mlPred.pLong  :
     finalSignal === "SHORT" ? mlPred.pShort :
@@ -240,74 +297,89 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
   const sinceLastSignal = now - lastSignalTime;
   const cooldownRemaining = Math.max(0, Math.ceil((COOLDOWN_MS - sinceLastSignal) / 1000));
   const smartMode = isSmartMode();
+  const session = getCurrentSession();
 
   if (cachedSignal && sinceLastSignal < SIGNAL_CACHE_TTL) {
-    return { ...cachedSignal, cooldownRemaining, smartMode };
+    return { ...cachedSignal, cooldownRemaining, smartMode, session };
   }
 
   const analytics = await getAnalyticsSummary();
 
   try {
-    const [candles15m, candles5m, candles1m] = await Promise.all([
+    // ── Intraday timeframes: 4H context, 1H confirmation, 15m entry ──────────
+    const [candles4h, candles1h, candles15m, candles1d] = await Promise.all([
+      fetchOHLC("4h"),
+      fetchOHLC("1h"),
       fetchOHLC("15m"),
-      fetchOHLC("5m"),
-      fetchOHLC("1m"),
+      fetchOHLC("1d"),
     ]);
 
+    const closes4h  = candles4h.map(c => c.close);
+    const closes1h  = candles1h.map(c => c.close);
     const closes15m = candles15m.map(c => c.close);
-    const closes5m  = candles5m.map(c => c.close);
-    const closes1m  = candles1m.map(c => c.close);
 
-    // ── Indicators ────────────────────────────────────────────────────────
-    const ema9_1m   = calcEMA(closes1m, 9);
-    const ema21_1m  = calcEMA(closes1m, 21);
-    const ema20_5m  = calcEMA(closes5m, 20);
-    const ema50_5m  = calcEMA(closes5m, 50);
+    // ── EMAs ──────────────────────────────────────────────────────────────
+    const ema20_4h  = calcEMA(closes4h, 20);
+    const ema50_4h  = calcEMA(closes4h, 50);
+    const ema20_1h  = calcEMA(closes1h, 20);
+    const ema50_1h  = calcEMA(closes1h, 50);
+    const ema200_1h = calcEMA(closes1h, 200);
     const ema20_15m = calcEMA(closes15m, 20);
     const ema50_15m = calcEMA(closes15m, 50);
 
-    const ema20  = ema20_5m[ema20_5m.length - 1]   ?? currentPrice;
-    const ema50  = ema50_5m[ema50_5m.length - 1]   ?? currentPrice;
-    const ema200 = ema20_15m[ema20_15m.length - 1] ?? currentPrice;
+    // Primary EMAs for signal display (1H-based)
+    const ema20  = ema20_1h[ema20_1h.length - 1]   ?? currentPrice;
+    const ema50  = ema50_1h[ema50_1h.length - 1]   ?? currentPrice;
+    const ema200 = ema200_1h[ema200_1h.length - 1] ?? currentPrice;
 
-    const trend15m = detectTrend(ema20_15m, ema50_15m);
-    const trend5m  = detectTrend(ema20_5m,  ema50_5m);
-    const trend1m  = detectTrend(ema9_1m,   ema21_1m);
-    const htTrend  = overallTrend(trend15m, trend5m, trend1m);
+    // ── Trend Detection ───────────────────────────────────────────────────
+    const trend4h  = detectTrend(ema20_4h,  ema50_4h);   // stored as trend1h
+    const trend1h  = detectTrend(ema20_1h,  ema50_1h);   // stored as trend15m
+    const trend15m = detectTrend(ema20_15m, ema50_15m);  // stored as trend5m
+    const htTrend  = overallTrend(trend4h, trend1h, trend15m);
 
-    const rsi5mArr = calcRSI(closes5m, 14);
-    const rsi      = rsi5mArr[rsi5mArr.length - 1] ?? 50;
+    // ── RSI / MACD from 1H ────────────────────────────────────────────────
+    const rsi1hArr = calcRSI(closes1h, 14);
+    const rsi      = rsi1hArr[rsi1hArr.length - 1] ?? 50;
 
-    const { macdLine, signalLine, histogram } = calcMACD(closes5m);
-    const macdVal      = macdLine[macdLine.length - 1]  ?? 0;
+    const { macdLine, signalLine, histogram } = calcMACD(closes1h);
+    const macdVal      = macdLine[macdLine.length - 1]    ?? 0;
     const macdSig      = signalLine[signalLine.length - 1] ?? 0;
     const macdHist     = histogram[histogram.length - 1]   ?? 0;
     const macdPrevHist = histogram[histogram.length - 2]   ?? 0;
     const macdBullish  = macdHist > 0 && macdHist > macdPrevHist;
     const macdBearish  = macdHist < 0 && macdHist < macdPrevHist;
 
-    const atrArr = calcATR(candles1m, 14);
-    const atr    = atrArr[atrArr.length - 1] ?? 3;
+    // ── ATR from 1H ───────────────────────────────────────────────────────
+    const atrArr = calcATR(candles1h, 14);
+    const atr    = atrArr[atrArr.length - 1] ?? 8;
 
-    const { support, resistance } = findSupportResistance(candles5m, 20);
+    const { support, resistance } = findSupportResistance(candles1h, 20);
 
-    // ── SMC Analysis ──────────────────────────────────────────────────────
-    const ms15m = detectMarketStructure(candles15m);
-    const ms5m  = detectMarketStructure(candles5m);
+    // ── Pivot Points from yesterday's daily candle ─────────────────────────
+    let pivots: PivotPoints | null = null;
+    if (candles1d.length >= 2) {
+      const prev = candles1d[candles1d.length - 2];
+      pivots = calcPivotPoints(prev.high, prev.low, prev.close);
+    }
 
-    const primaryStructure = ms5m.structure;
-    const contextStructure = ms15m.structure;
+    // ── SMC Analysis on 1H + 4H ───────────────────────────────────────────
+    const ms4h = detectMarketStructure(candles4h);
+    const ms1h = detectMarketStructure(candles1h);
+
+    const primaryStructure = ms1h.structure;
+    const contextStructure = ms4h.structure;
 
     const isRanging =
       primaryStructure === "RANGING" && contextStructure === "RANGING";
 
-    const liqZones5m = detectLiquidityZones(candles5m, 0.0012);
-    const sweptLow   = liqZones5m.some(z => z.type === "equal_low"  && z.swept);
-    const sweptHigh  = liqZones5m.some(z => z.type === "equal_high" && z.swept);
+    const liqZones1h = detectLiquidityZones(candles1h, 0.0012);
+    const sweptLow   = liqZones1h.some(z => z.type === "equal_low"  && z.swept);
+    const sweptHigh  = liqZones1h.some(z => z.type === "equal_high" && z.swept);
 
-    const bosResult = detectBOS(candles5m, ms5m);
+    const bosResult = detectBOS(candles1h, ms1h);
 
-    const { bullishOB, bearishOB } = detectOrderBlocks(candles5m, 40);
+    const { bullishOB, bearishOB } = detectOrderBlocks(candles1h, 40);
 
     const inBullishOB = bullishOB !== null &&
       currentPrice >= bullishOB.low * 0.9985 &&
@@ -339,8 +411,8 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       signal: "SHORT",
     });
 
-    // ── LSTM Time-Series Prediction ────────────────────────────────────────
-    const mlPred = predictLSTM(candles1m.slice(-50));
+    // ── LSTM on 1H candles ────────────────────────────────────────────────
+    const mlPred = predictLSTM(candles1h.slice(-50));
 
     // ── Hybrid Decision ───────────────────────────────────────────────────
     const hybrid = hybridDecide({
@@ -348,6 +420,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       shortConf:     shortConfidence,
       mlPred,
       isRanging,
+      isAsian:       session.asian,
       smartMode,
       winRate:       analytics.winRate,
       sufficientData: analytics.sufficientData,
@@ -368,22 +441,23 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       finalSignal = "HOLD";
     }
 
-    // ── SL / TP (always driven by SMC levels) ─────────────────────────────
-    const slDist = Math.max(atr * 1.0, 2);
+    // ── Intraday SL / TP — wider distances via ATR ────────────────────────
+    // SL: 1.5× ATR (min $8), TP: 2.5× SL  →  1:1.67 R:R minimum
+    const slDist = Math.max(atr * 1.5, 8);
     let stopLoss: number;
     let takeProfit: number;
 
     if (finalSignal === "LONG") {
-      const slBase = bullishOB ? Math.min(bullishOB.low - 0.5, support - 0.25) : support - 0.25;
+      const slBase = bullishOB ? Math.min(bullishOB.low - 1.0, support - 0.5) : support - 0.5;
       stopLoss   = +Math.min(currentPrice - slDist, slBase).toFixed(2);
-      takeProfit = +(currentPrice + slDist * 2).toFixed(2);
+      takeProfit = +(currentPrice + slDist * 2.5).toFixed(2);
     } else if (finalSignal === "SHORT") {
-      const slBase = bearishOB ? Math.max(bearishOB.high + 0.5, resistance + 0.25) : resistance + 0.25;
+      const slBase = bearishOB ? Math.max(bearishOB.high + 1.0, resistance + 0.5) : resistance + 0.5;
       stopLoss   = +Math.max(currentPrice + slDist, slBase).toFixed(2);
-      takeProfit = +(currentPrice - slDist * 2).toFixed(2);
+      takeProfit = +(currentPrice - slDist * 2.5).toFixed(2);
     } else {
       stopLoss   = +(currentPrice - slDist).toFixed(2);
-      takeProfit = +(currentPrice + slDist * 1.5).toFixed(2);
+      takeProfit = +(currentPrice + slDist * 2.0).toFixed(2);
     }
 
     // ── Reason String ─────────────────────────────────────────────────────
@@ -403,22 +477,28 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       if (inBearishOB)          smcParts.push("In OB");
     }
 
+    const sessionNote = `[${session.active}]`;
+
     let reason: string;
     if (finalSignal !== "HOLD") {
       const mlPart = mlPred.modelStatus === "trained"
         ? ` · LSTM ${mlPred.signal === finalSignal ? "✓" : "✗"} ${mlPred.confidence}%`
         : "";
-      reason = `${signalStrength} ${finalSignal} [hybrid: ${hybridConfidence}%] — SMC: ${smcConfidence}% (${smcParts.join(", ")})${mlPart}`;
+      reason = `${signalStrength} ${finalSignal} ${sessionNote} [hybrid: ${hybridConfidence}%] — SMC 1H/4H: ${smcConfidence}% (${smcParts.join(", ")})${mlPart}`;
     } else if (finalSignal !== hybrid.finalSignal) {
-      reason = `HOLD – cooldown ${Math.ceil(cooldownRemaining / 60)}m remaining`;
+      const hLeft = Math.floor(cooldownRemaining / 3600);
+      const mLeft = Math.ceil((cooldownRemaining % 3600) / 60);
+      reason = `HOLD – cooldown ${hLeft > 0 ? `${hLeft}h ` : ""}${mLeft}m remaining`;
+    } else if (session.asian && smcSignal !== "HOLD") {
+      reason = `HOLD – Asian session (low liquidity); raising thresholds · SMC ${smcSignal} ${smcConfidence}%`;
     } else if (isRanging) {
-      reason = `HOLD – Sideways market (RANGING on 5m+15m) · SMC L:${longConfidence}% S:${shortConfidence}% · LSTM ${mlPred.signal} ${mlPred.confidence}%`;
+      reason = `HOLD – Sideways market (RANGING on 1H+4H) ${sessionNote} · SMC L:${longConfidence}% S:${shortConfidence}% · LSTM ${mlPred.signal} ${mlPred.confidence}%`;
     } else if (mlPred.modelStatus === "trained" && smcSignal === "HOLD") {
-      reason = `HOLD – SMC incomplete (L:${longConfidence}% S:${shortConfidence}%) · LSTM ${mlPred.signal} ${mlPred.confidence}%`;
+      reason = `HOLD – SMC incomplete (L:${longConfidence}% S:${shortConfidence}%) ${sessionNote} · LSTM ${mlPred.signal} ${mlPred.confidence}%`;
     } else if (smcSignal !== "HOLD" && signalStrength === null) {
-      reason = `HOLD – SMC ${smcSignal} ${smcConfidence}% (need ≥${SMC_SOLO_THRESHOLD}% solo or ≥${SMC_AGREE_THRESHOLD}% with LSTM agreement)`;
+      reason = `HOLD – SMC ${smcSignal} ${smcConfidence}% below threshold ${sessionNote}`;
     } else {
-      reason = `HOLD – Waiting for confluence · L:${longConfidence}% S:${shortConfidence}%`;
+      reason = `HOLD – Waiting for confluence ${sessionNote} · L:${longConfidence}% S:${shortConfidence}%`;
     }
 
     if (finalSignal !== "HOLD") {
@@ -426,7 +506,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       lastSignalTime  = now;
     }
 
-    // ── Populate OB / Sweep for display ───────────────────────────────────
+    // ── Populate OB for display ────────────────────────────────────────────
     const activeOB: OrderBlockInfo | null =
       finalSignal === "LONG"  && bullishOB ? { type: "bullish", high: bullishOB.high, low: bullishOB.low } :
       finalSignal === "SHORT" && bearishOB ? { type: "bearish", high: bearishOB.high, low: bearishOB.low } :
@@ -456,9 +536,11 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       trend:      htTrend,
       reason,
       timestamp:  new Date().toISOString(),
-      tradeDuration: "5-15 minutes",
+      tradeDuration: "2-8 hours",
       cooldownRemaining: finalSignal !== "HOLD" ? 0 : cooldownRemaining,
       smartMode,
+      session,
+      pivots,
       // Hybrid fields
       smcSignal,
       smcConfidence,
@@ -482,9 +564,9 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
         macdSignal:    +macdSig.toFixed(4),
         macdHistogram: +macdHist.toFixed(4),
         atr:           +atr.toFixed(2),
-        trend1h:  trend15m,
-        trend15m: trend5m,
-        trend5m:  trend1m,
+        trend1h:  trend4h,   // 4H context  → trend1h field
+        trend15m: trend1h,   // 1H confirm  → trend15m field
+        trend5m:  trend15m,  // 15m entry   → trend5m field
       },
       // ML fields
       mlSignal:      mlPred.signal,
@@ -503,7 +585,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
 
   } catch (err) {
     logger.error({ err }, "Signal generation error");
-    const slDist = 4;
+    const slDist = 10;
     const { getLSTMStatus } = await import("./lstmModel.js");
     const mlStatus = getLSTMStatus();
     return {
@@ -511,13 +593,15 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       confidence: 0,
       entryPrice: +currentPrice.toFixed(2),
       stopLoss:   +(currentPrice - slDist).toFixed(2),
-      takeProfit: +(currentPrice + slDist * 1.5).toFixed(2),
+      takeProfit: +(currentPrice + slDist * 2.0).toFixed(2),
       trend: "NEUTRAL",
       reason: "HOLD – market data unavailable",
       timestamp: new Date().toISOString(),
-      tradeDuration: "5-15 minutes",
+      tradeDuration: "2-8 hours",
       cooldownRemaining,
       smartMode,
+      session: getCurrentSession(),
+      pivots: null,
       smcSignal:        "HOLD",
       smcConfidence:    0,
       signalStrength:   null,
@@ -532,7 +616,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       smcScore: 0,
       indicators: {
         rsi: 50, ema20: currentPrice, ema50: currentPrice, ema200: currentPrice,
-        macdLine: 0, macdSignal: 0, macdHistogram: 0, atr: 3,
+        macdLine: 0, macdSignal: 0, macdHistogram: 0, atr: 8,
         trend1h: "NEUTRAL", trend15m: "NEUTRAL", trend5m: "NEUTRAL",
       },
       mlSignal:      "NO_TRADE",

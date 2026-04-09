@@ -5,6 +5,7 @@ import { LiveTickChart } from "./live-tick-chart";
 
 type Tab = "ticks" | "ohlc";
 
+// Intraday-first timeframes — default opens on 1H
 const TIMEFRAMES = [
   { label: "15m", value: "15" },
   { label: "1H",  value: "60" },
@@ -38,7 +39,8 @@ function buildChartUrl(interval: string): string {
 }
 
 export function ChartWidget() {
-  const [tab, setTab]           = useState<Tab>("ticks");
+  // Default to OHLC at 1H for intraday trading
+  const [tab, setTab]           = useState<Tab>("ohlc");
   const [interval, setInterval] = useState("60");
   const [iframeKey, setIframeKey] = useState(0);
 

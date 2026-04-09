@@ -9,7 +9,7 @@ import {
   AlertCircle, Target, ShieldX, ArrowRightCircle,
   TrendingUp, TrendingDown, Minus, Zap,
   Waves, BarChart3, BoxSelect, ArrowUpFromLine, ArrowDownFromLine,
-  Brain, Cpu, RefreshCw, FlameKindling, Sparkles,
+  Brain, Cpu, RefreshCw, FlameKindling, Sparkles, Globe,
 } from "lucide-react";
 import { CooldownTimer } from "./cooldown-timer";
 import { motion } from "framer-motion";
@@ -56,13 +56,11 @@ function ProbBar({ label, value, color, isWinner }: {
   );
 }
 
-// Mini signal chip for the three-way display
 function SignalChip({
   label, signal, confidence, sub,
 }: { label: string; signal: string; confidence?: number; sub?: string }) {
   const isLong  = signal === "LONG";
   const isShort = signal === "SHORT";
-  const isHold  = signal === "HOLD" || signal === "NO_TRADE";
 
   return (
     <div className="flex flex-col items-center gap-1.5 flex-1">
@@ -86,7 +84,6 @@ function SignalChip({
   );
 }
 
-// Signal strength badge
 function StrengthBadge({ strength }: { strength: "STRONG" | "NORMAL" | null }) {
   if (strength === "STRONG") return (
     <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30">
@@ -103,6 +100,55 @@ function StrengthBadge({ strength }: { strength: "STRONG" | "NORMAL" | null }) {
   return null;
 }
 
+// ── Session badge ─────────────────────────────────────────────────────────────
+function SessionBadge({ active, asian }: { active?: string; asian?: boolean }) {
+  if (!active) return null;
+  const isAsian = asian;
+  return (
+    <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-semibold tracking-wide ${
+      isAsian
+        ? "bg-orange-500/10 border-orange-500/25 text-orange-400"
+        : "bg-sky-500/10 border-sky-500/25 text-sky-400"
+    }`}>
+      <Globe className="w-3 h-3" />
+      {active}
+      {isAsian && <span className="text-orange-400/60">· Low liquidity</span>}
+    </div>
+  );
+}
+
+// ── Pivot points row ──────────────────────────────────────────────────────────
+function PivotRow({
+  pivots, currentPrice,
+}: {
+  pivots: { pivot: number; r1: number; r2: number; s1: number; s2: number } | null | undefined;
+  currentPrice: number;
+}) {
+  if (!pivots) return null;
+  const levels = [
+    { label: "R2", value: pivots.r2, color: "text-red-400/70" },
+    { label: "R1", value: pivots.r1, color: "text-red-400/90" },
+    { label: "PP", value: pivots.pivot, color: "text-amber-400" },
+    { label: "S1", value: pivots.s1, color: "text-emerald-400/90" },
+    { label: "S2", value: pivots.s2, color: "text-emerald-400/70" },
+  ];
+  return (
+    <div className="bg-black/30 border border-white/5 rounded-xl p-3">
+      <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest mb-2">Daily Pivot Points</p>
+      <div className="flex items-center justify-between gap-1">
+        {levels.map(l => (
+          <div key={l.label} className={`flex flex-col items-center gap-0.5 flex-1 ${
+            Math.abs(currentPrice - l.value) < 2 ? "ring-1 ring-amber-400/30 rounded-lg bg-amber-500/5 p-1" : ""
+          }`}>
+            <span className="text-[9px] text-muted-foreground/50 font-mono">{l.label}</span>
+            <span className={`text-[11px] font-mono font-bold ${l.color}`}>{l.value.toFixed(0)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Colour helpers
 const structureColor = (s?: string) =>
   s === "UPTREND" ? "text-emerald-400" : s === "DOWNTREND" ? "text-red-400" : "text-zinc-400";
@@ -117,10 +163,10 @@ const sweepColor = (on?: boolean) => on ? "text-cyan-400"  : "text-zinc-600";
 export function SignalPanel() {
   const { data: signalData, isLoading, isError } = useGetSignal({
     query: {
-      refetchInterval: 30000,          // poll every 30 s (backend cache is 60 s)
-      refetchIntervalInBackground: true, // keep polling even when tab is in background
-      refetchOnWindowFocus: true,        // immediate refresh when tab gains focus
-      staleTime: 25000,                  // consider data stale after 25 s
+      refetchInterval: 300000,
+      refetchIntervalInBackground: true,
+      refetchOnWindowFocus: true,
+      staleTime: 240000,
     }
   });
 
@@ -162,6 +208,9 @@ export function SignalPanel() {
     smcSignal, smcConfidence, signalStrength, hybridConfidence,
   } = signalData;
 
+  const session = (signalData as any).session as { london: boolean; newYork: boolean; asian: boolean; active: string } | undefined;
+  const pivots  = (signalData as any).pivots  as { pivot: number; r1: number; r2: number; s1: number; s2: number } | null | undefined;
+
   const mlWinner = mlPLong >= mlPShort && mlPLong >= mlPNoTrade ? "LONG"
     : mlPShort >= mlPLong  && mlPShort >= mlPNoTrade ? "SHORT" : "NO_TRADE";
 
@@ -174,7 +223,6 @@ export function SignalPanel() {
   const TrendIcon = trend === "BULLISH" ? TrendingUp : trend === "BEARISH" ? TrendingDown : Minus;
   const trendColor = trend === "BULLISH" ? "text-success" : trend === "BEARISH" ? "text-destructive" : "text-muted-foreground";
 
-  // Hybrid confidence bar colour
   const hybridBarColor =
     hybridConfidence >= 80 ? "bg-amber-400" :
     hybridConfidence >= 65 ? "bg-emerald-500" :
@@ -191,12 +239,15 @@ export function SignalPanel() {
 
       <CardContent className="p-6 lg:p-8 flex flex-col gap-5 relative z-10">
 
-        {/* ── Final Signal + Hybrid Confidence ─────────────────────────── */}
+        {/* ── Session + Final Signal + Hybrid Confidence ────────────────── */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h2 className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-widest">
-              Hybrid AI Signal
-            </h2>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
+                Intraday AI Signal
+              </h2>
+              <SessionBadge active={session?.active} asian={session?.asian} />
+            </div>
             <div className="flex items-center gap-3">
               <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
@@ -233,9 +284,12 @@ export function SignalPanel() {
                 transition={{ duration: 1, ease: "easeOut" }}
               />
             </div>
-            <p className="text-[10px] text-zinc-500 text-right">60% SMC · 40% LSTM</p>
+            <p className="text-[10px] text-zinc-500 text-right">60% SMC (1H/4H) · 40% LSTM</p>
           </div>
         </div>
+
+        {/* ── Pivot Points ──────────────────────────────────────────────── */}
+        <PivotRow pivots={pivots} currentPrice={entryPrice} />
 
         {/* ── Three-Signal Display ──────────────────────────────────────── */}
         <div className="rounded-2xl border border-white/8 bg-black/25 p-4">
@@ -245,7 +299,7 @@ export function SignalPanel() {
               label="SMC Signal"
               signal={smcSignal}
               confidence={smcConfidence}
-              sub="Smart Money"
+              sub="1H/4H SMC"
             />
             <div className="flex flex-col items-center justify-center px-1 pt-4">
               <div className="text-lg text-muted-foreground/30">+</div>
@@ -254,7 +308,7 @@ export function SignalPanel() {
               label="LSTM Signal"
               signal={mlModelStatus === "trained" ? mlSignal : "NO_TRADE"}
               confidence={mlModelStatus === "trained" ? mlConfidence : undefined}
-              sub={mlModelStatus === "trained" ? "LSTM" : "Not trained"}
+              sub={mlModelStatus === "trained" ? "LSTM 1H" : "Not trained"}
             />
             <div className="flex flex-col items-center justify-center px-1 pt-4">
               <div className="text-lg text-muted-foreground/30">=</div>
@@ -271,7 +325,6 @@ export function SignalPanel() {
             />
           </div>
 
-          {/* Agreement indicators */}
           <div className="flex items-center justify-center gap-4 mt-3 pt-3 border-t border-white/5">
             <div className="flex items-center gap-1.5">
               <div className={`w-2 h-2 rounded-full ${smcAgrees ? "bg-emerald-400" : signal === "HOLD" ? "bg-zinc-600" : "bg-red-500/60"}`} />
