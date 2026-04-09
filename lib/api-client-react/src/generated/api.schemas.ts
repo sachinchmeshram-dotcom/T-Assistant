@@ -176,6 +176,15 @@ export interface SignalResponse {
   mlAccuracy:    number;
   /** True when ML is driving the final signal (confidence ≥ 65%) */
   mlEnabled:     boolean;
+  // ── Hybrid AI fields ─────────────────────────────────────────────────────
+  /** Raw SMC-only signal before hybrid decision */
+  smcSignal:        "LONG" | "SHORT" | "HOLD";
+  /** Raw SMC confidence for the dominant direction */
+  smcConfidence:    number;
+  /** STRONG = SMC+ML agree, NORMAL = SMC ≥80% solo, null = HOLD */
+  signalStrength:   "STRONG" | "NORMAL" | null;
+  /** Combined confidence: 60% SMC + 40% ML */
+  hybridConfidence: number;
 }
 
 export type HistoryEntrySignal =

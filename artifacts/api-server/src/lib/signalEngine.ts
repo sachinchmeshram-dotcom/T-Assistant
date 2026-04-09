@@ -34,6 +34,11 @@ export interface SignalResult {
   tradeDuration: string;
   cooldownRemaining: number;
   smartMode: boolean;
+  // ── Hybrid AI fields ──────────────────────────────────────────────────────
+  smcSignal:       "LONG" | "SHORT" | "HOLD";
+  smcConfidence:   number;                      // raw SMC score 0-100
+  signalStrength:  "STRONG" | "NORMAL" | null;  // STRONG=both agree, NORMAL=SMC solo ≥80
+  hybridConfidence: number;                     // 60% SMC + 40% ML
   // ── Smart Money Concept fields ────────────────────────────────────────────
   marketStructure: "UPTREND" | "DOWNTREND" | "RANGING";
   bos: boolean;
@@ -58,14 +63,14 @@ export interface SignalResult {
   };
   // ── ML Neural Network fields ──────────────────────────────────────────────
   mlSignal:      "LONG" | "SHORT" | "NO_TRADE";
-  mlConfidence:  number;   // 0-100
-  mlPLong:       number;   // class probability 0-100
+  mlConfidence:  number;
+  mlPLong:       number;
   mlPShort:      number;
   mlPNoTrade:    number;
   mlModelStatus: MLModelStatus;
   mlTrainedOn:   number;
   mlAccuracy:    number;
-  mlEnabled:     boolean;  // true = ML is driving the final signal
+  mlEnabled:     boolean;
 }
 
 interface LastSignalState {
@@ -82,6 +87,15 @@ const SIGNAL_CACHE_TTL   = 60_000;
 const COOLDOWN_MS        = 300_000;
 const MIN_PRICE_MOVE_PCT = 0.001;
 
+// ── SMC confidence thresholds ─────────────────────────────────────────────
+// STRONG = SMC + ML agree  → SMC needs to be ≥ this
+const SMC_AGREE_THRESHOLD   = 60;
+// NORMAL = SMC alone        → SMC needs to be ≥ this
+const SMC_SOLO_THRESHOLD    = 80;
+// Ranging market raises both thresholds (sideways suppression)
+const RANGING_AGREE_EXTRA   = 10;
+const RANGING_SOLO_EXTRA    = 8;
+
 // ── SMC Confidence Scoring using adaptive weights ─────────────────────────
 function calcSmcConfidence(opts: {
   structureAligned: boolean;
@@ -96,24 +110,14 @@ function calcSmcConfidence(opts: {
   const { structureAligned, bosConfirmed, liquiditySweep, inOrderBlock,
           rsi, macdBullish, macdBearish, signal } = opts;
 
-  // Pull latest adaptive weights (updated by analytics every 30s)
   const w = getAdaptiveWeights();
 
   let score = 0;
-
-  // 1. Market structure alignment
   if (structureAligned) score += w.structure;
+  if (bosConfirmed)     score += w.bos;
+  if (liquiditySweep)   score += w.liquidity;
+  if (inOrderBlock)     score += w.orderBlock;
 
-  // 2. Break of Structure confirmed
-  if (bosConfirmed) score += w.bos;
-
-  // 3. Liquidity sweep present
-  if (liquiditySweep) score += w.liquidity;
-
-  // 4. Price in Order Block zone
-  if (inOrderBlock) score += w.orderBlock;
-
-  // 5. RSI + MACD filter
   const rsiOk = signal === "LONG"
     ? rsi >= 30 && rsi <= 65
     : rsi >= 35 && rsi <= 70;
@@ -138,8 +142,98 @@ function overallTrend(
   return "NEUTRAL";
 }
 
-// ── Min confidence to emit a non-HOLD signal ──────────────────────────────
-const BASE_MIN_CONFIDENCE = 60;
+// ── Hybrid Decision Engine ────────────────────────────────────────────────
+interface HybridDecision {
+  smcSignal:        "LONG" | "SHORT" | "HOLD";
+  signalStrength:   "STRONG" | "NORMAL" | null;
+  finalSignal:      "LONG" | "SHORT" | "HOLD";
+  hybridConfidence: number;
+  smcConfidence:    number;
+}
+
+function hybridDecide(opts: {
+  longConf:    number;
+  shortConf:   number;
+  mlPred:      MLPrediction;
+  isRanging:   boolean;
+  smartMode:   boolean;
+  winRate:     number;
+  sufficientData: boolean;
+}): HybridDecision {
+  const { longConf, shortConf, mlPred, isRanging, smartMode, winRate, sufficientData } = opts;
+
+  // Dynamic thresholds
+  let agreeThreshold = SMC_AGREE_THRESHOLD;
+  let soloThreshold  = SMC_SOLO_THRESHOLD;
+
+  if (isRanging) {
+    agreeThreshold += RANGING_AGREE_EXTRA;
+    soloThreshold  += RANGING_SOLO_EXTRA;
+  }
+
+  if (smartMode && sufficientData) {
+    if (winRate < 60) {
+      agreeThreshold += 8;
+      soloThreshold  += 8;
+    } else if (winRate >= 70) {
+      agreeThreshold = Math.max(agreeThreshold - 5, 50);
+      soloThreshold  = Math.max(soloThreshold  - 5, 72);
+    }
+  }
+
+  // 1. Determine raw SMC signal
+  const smcSignal: "LONG" | "SHORT" | "HOLD" =
+    longConf  >= agreeThreshold && longConf  > shortConf + 5 ? "LONG"  :
+    shortConf >= agreeThreshold && shortConf > longConf  + 5 ? "SHORT" :
+    "HOLD";
+
+  const dominantSmcConf = smcSignal === "LONG"  ? longConf
+                        : smcSignal === "SHORT" ? shortConf
+                        : Math.max(longConf, shortConf);
+
+  // 2. ML signal (only trust when model is trained)
+  const mlTrained = mlPred.modelStatus === "trained";
+  const effectiveMlSignal = mlTrained ? mlPred.signal : "NO_TRADE";
+
+  // 3. Agreement check
+  const agreed =
+    smcSignal !== "HOLD" &&
+    effectiveMlSignal !== "NO_TRADE" &&
+    smcSignal === effectiveMlSignal;
+
+  // 4. Strength determination
+  let signalStrength: "STRONG" | "NORMAL" | null = null;
+
+  if (agreed && longConf >= agreeThreshold || agreed && shortConf >= agreeThreshold) {
+    signalStrength = "STRONG";
+  } else if (smcSignal !== "HOLD" && dominantSmcConf >= soloThreshold) {
+    signalStrength = "NORMAL";
+  }
+
+  const finalSignal: "LONG" | "SHORT" | "HOLD" =
+    signalStrength !== null ? smcSignal : "HOLD";
+
+  // 5. Hybrid confidence = 60% SMC + 40% ML (direction-specific ML prob)
+  const mlProbForDir =
+    finalSignal === "LONG"  ? mlPred.pLong  :
+    finalSignal === "SHORT" ? mlPred.pShort :
+    Math.max(mlPred.pLong, mlPred.pShort);
+
+  const smcConf = finalSignal !== "HOLD" ? dominantSmcConf
+    : Math.max(longConf, shortConf);
+
+  const hybridConfidence = mlTrained
+    ? Math.round(smcConf * 0.6 + mlProbForDir * 0.4)
+    : smcConf;
+
+  return {
+    smcSignal,
+    signalStrength,
+    finalSignal,
+    hybridConfidence: Math.min(100, hybridConfidence),
+    smcConfidence: smcConf,
+  };
+}
 
 export async function generateSignal(currentPrice: number): Promise<SignalResult> {
   const now = Date.now();
@@ -153,14 +247,6 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
 
   const analytics = await getAnalyticsSummary();
 
-  // Smart Mode adjusts confidence threshold
-  let MIN_CONFIDENCE = BASE_MIN_CONFIDENCE;
-  if (smartMode && analytics.sufficientData && analytics.winRate < 60) {
-    MIN_CONFIDENCE = 72;   // strict — demand very strong SMC confluence
-  } else if (smartMode && analytics.sufficientData && analytics.winRate >= 70) {
-    MIN_CONFIDENCE = 55;   // performing well — slightly looser
-  }
-
   try {
     const [candles15m, candles5m, candles1m] = await Promise.all([
       fetchOHLC("15m"),
@@ -172,7 +258,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
     const closes5m  = candles5m.map(c => c.close);
     const closes1m  = candles1m.map(c => c.close);
 
-    // ── Classic indicators (kept for RSI/MACD filter + SL/TP) ───────────────
+    // ── Indicators ────────────────────────────────────────────────────────
     const ema9_1m   = calcEMA(closes1m, 9);
     const ema21_1m  = calcEMA(closes1m, 21);
     const ema20_5m  = calcEMA(closes5m, 20);
@@ -205,30 +291,24 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
 
     const { support, resistance } = findSupportResistance(candles5m, 20);
 
-    // ── SMC Analysis ─────────────────────────────────────────────────────────
-
-    // 1. Market structure on 15m (macro context) and 5m (entry context)
+    // ── SMC Analysis ──────────────────────────────────────────────────────
     const ms15m = detectMarketStructure(candles15m);
     const ms5m  = detectMarketStructure(candles5m);
 
-    // Use 5m structure as primary, 15m as confirmation
     const primaryStructure = ms5m.structure;
     const contextStructure = ms15m.structure;
 
-    // 2. Liquidity zones on 5m
+    const isRanging =
+      primaryStructure === "RANGING" && contextStructure === "RANGING";
+
     const liqZones5m = detectLiquidityZones(candles5m, 0.0012);
+    const sweptLow   = liqZones5m.some(z => z.type === "equal_low"  && z.swept);
+    const sweptHigh  = liqZones5m.some(z => z.type === "equal_high" && z.swept);
 
-    // Swept equal low → bullish setup (SMT sweep before long)
-    const sweptLow  = liqZones5m.some(z => z.type === "equal_low"  && z.swept);
-    const sweptHigh = liqZones5m.some(z => z.type === "equal_high" && z.swept);
-
-    // 3. BOS on 5m
     const bosResult = detectBOS(candles5m, ms5m);
 
-    // 4. Order Blocks on 5m (last 40 candles)
     const { bullishOB, bearishOB } = detectOrderBlocks(candles5m, 40);
 
-    // Is price in an OB zone right now?
     const inBullishOB = bullishOB !== null &&
       currentPrice >= bullishOB.low * 0.9985 &&
       currentPrice <= bullishOB.high * 1.0015;
@@ -237,7 +317,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       currentPrice >= bearishOB.low * 0.9985 &&
       currentPrice <= bearishOB.high * 1.0015;
 
-    // ── SMC Confidence scores (used as ML features + fallback) ───────────────
+    // ── SMC Confidence Scores ─────────────────────────────────────────────
     const longStructure  = primaryStructure === "UPTREND" || contextStructure === "UPTREND";
     const shortStructure = primaryStructure === "DOWNTREND" || contextStructure === "DOWNTREND";
 
@@ -246,9 +326,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       bosConfirmed:     bosResult.bullishBOS,
       liquiditySweep:   sweptLow,
       inOrderBlock:     inBullishOB,
-      rsi,
-      macdBullish,
-      macdBearish,
+      rsi, macdBullish, macdBearish,
       signal: "LONG",
     });
 
@@ -257,13 +335,11 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       bosConfirmed:     bosResult.bearishBOS,
       liquiditySweep:   sweptHigh,
       inOrderBlock:     inBearishOB,
-      rsi,
-      macdBullish,
-      macdBearish,
+      rsi, macdBullish, macdBearish,
       signal: "SHORT",
     });
 
-    // ── ML Neural Network prediction ─────────────────────────────────────────
+    // ── ML Prediction ─────────────────────────────────────────────────────
     const dominantSMCScore = Math.max(longConfidence, shortConfidence);
     const mlFeatures = featurize({
       marketStructure: primaryStructure,
@@ -275,45 +351,38 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
     });
     const mlPred = predict(mlFeatures);
 
-    // ── Signal decision: ML drives when trained + confident, else SMC fallback
-    let rawSignal: "LONG" | "SHORT" | "HOLD" = "HOLD";
-    let confidence = 0;
-    let mlDriving  = false;
+    // ── Hybrid Decision ───────────────────────────────────────────────────
+    const hybrid = hybridDecide({
+      longConf:      longConfidence,
+      shortConf:     shortConfidence,
+      mlPred,
+      isRanging,
+      smartMode,
+      winRate:       analytics.winRate,
+      sufficientData: analytics.sufficientData,
+    });
 
-    if (mlPred.enabled && mlPred.signal !== "NO_TRADE") {
-      rawSignal  = mlPred.signal;
-      confidence = mlPred.confidence;
-      mlDriving  = true;
-    } else if (longConfidence >= MIN_CONFIDENCE && longConfidence > shortConfidence + 5) {
-      rawSignal  = "LONG";
-      confidence = longConfidence;
-    } else if (shortConfidence >= MIN_CONFIDENCE && shortConfidence > longConfidence + 5) {
-      rawSignal  = "SHORT";
-      confidence = shortConfidence;
-    } else {
-      confidence = dominantSMCScore;
-    }
+    const { smcSignal, signalStrength, hybridConfidence, smcConfidence } = hybrid;
+    let finalSignal = hybrid.finalSignal;
 
-    // ── Cooldown guard ────────────────────────────────────────────────────────
+    // ── Cooldown Guard ────────────────────────────────────────────────────
     const inCooldown     = sinceLastSignal < COOLDOWN_MS;
     const priceMoved     = lastSignalState
       ? Math.abs(currentPrice - lastSignalState.price) / lastSignalState.price >= MIN_PRICE_MOVE_PCT
       : true;
     const oppositeSignal = lastSignalState &&
-      rawSignal !== "HOLD" && rawSignal !== lastSignalState.signal;
+      finalSignal !== "HOLD" && finalSignal !== lastSignalState.signal;
 
-    let finalSignal: "LONG" | "SHORT" | "HOLD" = rawSignal;
-    if (rawSignal !== "HOLD" && inCooldown && !priceMoved && !oppositeSignal) {
+    if (finalSignal !== "HOLD" && inCooldown && !priceMoved && !oppositeSignal) {
       finalSignal = "HOLD";
     }
 
-    // ── SL / TP ───────────────────────────────────────────────────────────────
+    // ── SL / TP (always driven by SMC levels) ─────────────────────────────
     const slDist = Math.max(atr * 1.0, 2);
     let stopLoss: number;
     let takeProfit: number;
 
     if (finalSignal === "LONG") {
-      // Place SL below bullish OB low if available, otherwise below support
       const slBase = bullishOB ? Math.min(bullishOB.low - 0.5, support - 0.25) : support - 0.25;
       stopLoss   = +Math.min(currentPrice - slDist, slBase).toFixed(2);
       takeProfit = +(currentPrice + slDist * 2).toFixed(2);
@@ -326,34 +395,39 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       takeProfit = +(currentPrice + slDist * 1.5).toFixed(2);
     }
 
-    // ── Reason string ─────────────────────────────────────────────────────────
+    // ── Reason String ─────────────────────────────────────────────────────
     const smcParts: string[] = [];
-    if (finalSignal === "LONG" || (finalSignal === "HOLD" && longConfidence >= shortConfidence)) {
-      smcParts.push(`Structure: ${primaryStructure}`);
-      if (sweptLow)             smcParts.push("Liquidity sweep (equal lows)");
-      if (bosResult.bullishBOS) smcParts.push(`BOS ↑ ${bosResult.bosLevel?.toFixed(2)}`);
-      if (bullishOB)            smcParts.push(`Bullish OB $${bullishOB.low.toFixed(2)}–$${bullishOB.high.toFixed(2)}`);
-      if (inBullishOB)          smcParts.push("Price IN bullish OB");
+    const isBullishDir = finalSignal === "LONG" || (finalSignal === "HOLD" && longConfidence >= shortConfidence);
+    if (isBullishDir) {
+      smcParts.push(`${primaryStructure}`);
+      if (sweptLow)             smcParts.push("Liq Sweep ↓");
+      if (bosResult.bullishBOS) smcParts.push(`BOS ↑${bosResult.bosLevel?.toFixed(0)}`);
+      if (bullishOB)            smcParts.push(`Bull OB $${bullishOB.low.toFixed(0)}`);
+      if (inBullishOB)          smcParts.push("In OB");
     } else {
-      smcParts.push(`Structure: ${primaryStructure}`);
-      if (sweptHigh)            smcParts.push("Liquidity sweep (equal highs)");
-      if (bosResult.bearishBOS) smcParts.push(`BOS ↓ ${bosResult.bosLevel?.toFixed(2)}`);
-      if (bearishOB)            smcParts.push(`Bearish OB $${bearishOB.low.toFixed(2)}–$${bearishOB.high.toFixed(2)}`);
-      if (inBearishOB)          smcParts.push("Price IN bearish OB");
+      smcParts.push(`${primaryStructure}`);
+      if (sweptHigh)            smcParts.push("Liq Sweep ↑");
+      if (bosResult.bearishBOS) smcParts.push(`BOS ↓${bosResult.bosLevel?.toFixed(0)}`);
+      if (bearishOB)            smcParts.push(`Bear OB $${bearishOB.high.toFixed(0)}`);
+      if (inBearishOB)          smcParts.push("In OB");
     }
 
     let reason: string;
     if (finalSignal !== "HOLD") {
-      const driver = mlDriving ? `ML ${confidence}%` : `SMC ${confidence}%`;
-      reason = `${finalSignal} (${driver}): ${smcParts.join(" · ")}`;
-    } else if (rawSignal !== "HOLD" && inCooldown) {
+      const mlPart = mlPred.modelStatus === "trained"
+        ? ` · ML ${mlPred.signal === finalSignal ? "✓" : "✗"} ${mlPred.confidence}%`
+        : "";
+      reason = `${signalStrength} ${finalSignal} [hybrid: ${hybridConfidence}%] — SMC: ${smcConfidence}% (${smcParts.join(", ")})${mlPart}`;
+    } else if (finalSignal !== hybrid.finalSignal) {
       reason = `HOLD – cooldown ${Math.ceil(cooldownRemaining / 60)}m remaining`;
-    } else if (smartMode && analytics.sufficientData && analytics.winRate < 60) {
-      reason = `HOLD – Smart Mode STRICT (win rate ${analytics.winRate}%): need confidence ≥${MIN_CONFIDENCE}% (LONG:${longConfidence}% SHORT:${shortConfidence}%)`;
-    } else if (mlPred.modelStatus === "trained") {
-      reason = `HOLD – ML: ${mlPred.pLong}% LONG / ${mlPred.pShort}% SHORT / ${mlPred.pNoTrade}% NO TRADE (need ≥65% to trigger)`;
+    } else if (isRanging) {
+      reason = `HOLD – Sideways market (RANGING on 5m+15m) · SMC L:${longConfidence}% S:${shortConfidence}% · ML ${mlPred.signal} ${mlPred.confidence}%`;
+    } else if (mlPred.modelStatus === "trained" && smcSignal === "HOLD") {
+      reason = `HOLD – SMC incomplete (L:${longConfidence}% S:${shortConfidence}%) · ML ${mlPred.signal} ${mlPred.confidence}%`;
+    } else if (smcSignal !== "HOLD" && signalStrength === null) {
+      reason = `HOLD – SMC ${smcSignal} ${smcConfidence}% (need ≥${SMC_SOLO_THRESHOLD}% solo or ≥${SMC_AGREE_THRESHOLD}% with ML agreement)`;
     } else {
-      reason = `HOLD – SMC conditions incomplete (LONG:${longConfidence}% SHORT:${shortConfidence}%, need ≥${MIN_CONFIDENCE}%)`;
+      reason = `HOLD – Waiting for confluence · L:${longConfidence}% S:${shortConfidence}%`;
     }
 
     if (finalSignal !== "HOLD") {
@@ -361,32 +435,30 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       lastSignalTime  = now;
     }
 
-    // Active OB for the signal direction
-    const activeOB: OrderBlockInfo | null = finalSignal === "LONG" && bullishOB
-      ? { type: "bullish", high: bullishOB.high, low: bullishOB.low }
-      : finalSignal === "SHORT" && bearishOB
-      ? { type: "bearish", high: bearishOB.high, low: bearishOB.low }
-      : (bullishOB && longConfidence >= shortConfidence)
-      ? { type: "bullish", high: bullishOB.high, low: bullishOB.low }
-      : bearishOB
-      ? { type: "bearish", high: bearishOB.high, low: bearishOB.low }
-      : null;
+    // ── Populate OB / Sweep for display ───────────────────────────────────
+    const activeOB: OrderBlockInfo | null =
+      finalSignal === "LONG"  && bullishOB ? { type: "bullish", high: bullishOB.high, low: bullishOB.low } :
+      finalSignal === "SHORT" && bearishOB ? { type: "bearish", high: bearishOB.high, low: bearishOB.low } :
+      bullishOB && longConfidence >= shortConfidence  ? { type: "bullish", high: bullishOB.high, low: bullishOB.low } :
+      bearishOB ? { type: "bearish", high: bearishOB.high, low: bearishOB.low } : null;
 
-    const liquiditySweep = finalSignal === "LONG" ? sweptLow
-      : finalSignal === "SHORT" ? sweptHigh
-      : longConfidence >= shortConfidence ? sweptLow : sweptHigh;
+    const liquiditySweep =
+      finalSignal === "LONG"  ? sweptLow  :
+      finalSignal === "SHORT" ? sweptHigh :
+      longConfidence >= shortConfidence ? sweptLow : sweptHigh;
 
-    const liquiditySweepType = liquiditySweep
+    const liquiditySweepType: "equal_low" | "equal_high" | null = liquiditySweep
       ? (finalSignal === "LONG" || longConfidence >= shortConfidence ? "equal_low" : "equal_high")
       : null;
 
-    const smcScore = finalSignal === "LONG" ? longConfidence
-      : finalSignal === "SHORT" ? shortConfidence
-      : Math.max(longConfidence, shortConfidence);
+    const smcScore =
+      finalSignal === "LONG"  ? longConfidence :
+      finalSignal === "SHORT" ? shortConfidence :
+      Math.max(longConfidence, shortConfidence);
 
     const result: SignalResult = {
       signal:     finalSignal,
-      confidence: finalSignal !== "HOLD" ? confidence : smcScore,
+      confidence: hybridConfidence,
       entryPrice: +currentPrice.toFixed(2),
       stopLoss,
       takeProfit,
@@ -396,6 +468,11 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       tradeDuration: "5-15 minutes",
       cooldownRemaining: finalSignal !== "HOLD" ? 0 : cooldownRemaining,
       smartMode,
+      // Hybrid fields
+      smcSignal,
+      smcConfidence,
+      signalStrength,
+      hybridConfidence,
       // SMC fields
       marketStructure:     primaryStructure,
       bos:                 bosResult.bullishBOS || bosResult.bearishBOS,
@@ -418,7 +495,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
         trend15m: trend5m,
         trend5m:  trend1m,
       },
-      // ML Neural Network fields
+      // ML fields
       mlSignal:      mlPred.signal,
       mlConfidence:  mlPred.confidence,
       mlPLong:       mlPred.pLong,
@@ -427,7 +504,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       mlModelStatus: mlPred.modelStatus,
       mlTrainedOn:   mlPred.trainedOn,
       mlAccuracy:    mlPred.accuracy,
-      mlEnabled:     mlDriving,
+      mlEnabled:     signalStrength === "STRONG",
     };
 
     cachedSignal = result;
@@ -450,6 +527,10 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       tradeDuration: "5-15 minutes",
       cooldownRemaining,
       smartMode,
+      smcSignal:        "HOLD",
+      smcConfidence:    0,
+      signalStrength:   null,
+      hybridConfidence: 0,
       marketStructure: "RANGING",
       bos: false,
       bosLevel: null,
