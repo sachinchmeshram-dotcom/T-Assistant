@@ -1,5 +1,6 @@
-import { useGetSignal } from "@workspace/api-client-react";
-import React from "react";
+import { useGetHistory, useGetPrice, useGetSignal } from "@workspace/api-client-react";
+import type { HistoryEntry } from "@workspace/api-client-react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -8,50 +9,168 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { IndicatorRow } from "@/components/IndicatorRow";
-import { PriceLevel } from "@/components/PriceLevel";
+import { PriceChart } from "@/components/PriceChart";
 import { SectionHeader } from "@/components/SectionHeader";
 import { SignalBadge } from "@/components/SignalBadge";
 import { useColors } from "@/hooks/useColors";
+import { useSignalNotifications } from "@/hooks/useSignalNotifications";
+
+// Compact history row
+function HistoryRow({ item }: { item: HistoryEntry }) {
+  const colors = useColors();
+  const statusColor =
+    item.tradeStatus === "TARGET_HIT"
+      ? colors.long
+      : item.tradeStatus === "STOP_HIT"
+        ? colors.short
+        : colors.mutedForeground;
+  const statusLabel =
+    item.tradeStatus === "TARGET_HIT"
+      ? "TP HIT"
+      : item.tradeStatus === "STOP_HIT"
+        ? "SL HIT"
+        : item.tradeStatus === "RUNNING"
+          ? "LIVE"
+          : "HOLD";
+
+  return (
+    <View style={[styles.historyRow, { borderColor: colors.border }]}>
+      <View style={styles.historyLeft}>
+        <SignalBadge signal={item.signal} size="sm" />
+        <Text style={[styles.historyTime, { color: colors.mutedForeground }]}>
+          {new Date(item.timestamp).toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </Text>
+      </View>
+      <Text style={[styles.historyEntry, { color: colors.foreground }]}>
+        ${item.entryPrice.toFixed(2)}
+      </Text>
+      <View style={styles.historyRight}>
+        <View
+          style={[
+            styles.statusBadge,
+            {
+              backgroundColor: statusColor + "22",
+              borderColor: statusColor + "55",
+            },
+          ]}
+        >
+          <Text style={[styles.statusText, { color: statusColor }]}>
+            {statusLabel}
+          </Text>
+        </View>
+        {item.pnlPoints !== undefined &&
+          item.pnlPoints !== null &&
+          item.tradeStatus !== "RUNNING" &&
+          item.tradeStatus !== "HOLD" && (
+            <Text
+              style={[
+                styles.pnlText,
+                { color: item.pnlPoints >= 0 ? colors.long : colors.short },
+              ]}
+            >
+              {item.pnlPoints >= 0 ? "+" : ""}
+              {item.pnlPoints.toFixed(1)}
+            </Text>
+          )}
+      </View>
+    </View>
+  );
+}
 
 export default function SignalScreen() {
   const colors = useColors();
-  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const chartWidth = width - 32;
 
-  const { data, isLoading, error, refetch, isFetching } = useGetSignal({
+  const [priceBuffer, setPriceBuffer] = useState<number[]>([]);
+  const prevPriceRef = useRef<number | null>(null);
+  const seededFromHistory = useRef(false);
+
+  const { checkSignal } = useSignalNotifications();
+
+  // Live price — fast polling
+  const { data: price } = useGetPrice({
+    query: { refetchInterval: 5000, staleTime: 4000 },
+  });
+
+  // AI signal — 30s polling
+  const {
+    data: signal,
+    isLoading,
+    error,
+    refetch,
+    isFetching,
+  } = useGetSignal({
     query: {
       refetchInterval: 30000,
       refetchOnWindowFocus: true,
+      refetchIntervalInBackground: true,
       staleTime: 25000,
     },
   });
+
+  // History for seed data and recent panel
+  const { data: history } = useGetHistory({
+    query: { refetchInterval: 30000, staleTime: 25000 },
+  });
+
+  // Seed chart from history on first load
+  useEffect(() => {
+    if (seededFromHistory.current) return;
+    if (!history?.signals || history.signals.length < 2) return;
+    const historicalPrices = [...history.signals]
+      .reverse()
+      .slice(-40)
+      .map((s) => s.entryPrice);
+    if (historicalPrices.length > 1) {
+      setPriceBuffer(historicalPrices);
+      seededFromHistory.current = true;
+    }
+  }, [history?.signals]);
+
+  // Accumulate live prices into rolling buffer
+  useEffect(() => {
+    if (!price?.price) return;
+    if (price.price === prevPriceRef.current) return;
+    prevPriceRef.current = price.price;
+    setPriceBuffer((prev) => [...prev.slice(-79), price.price]);
+  }, [price?.price]);
+
+  // Fire notification when signal changes
+  useEffect(() => {
+    if (signal) {
+      checkSignal(signal.signal, signal.confidence);
+    }
+  }, [signal?.signal]);
 
   const topPad = Platform.OS === "web" ? 67 : 0;
   const bottomPad = Platform.OS === "web" ? 34 : 0;
 
   const signalColor =
-    data?.signal === "LONG"
+    signal?.signal === "LONG"
       ? colors.long
-      : data?.signal === "SHORT"
+      : signal?.signal === "SHORT"
         ? colors.short
         : colors.mutedForeground;
 
-  const trendColor = (t: string | undefined) => {
-    if (t === "BULLISH") return colors.long;
-    if (t === "BEARISH") return colors.short;
-    return colors.mutedForeground;
-  };
+  const changeColor = (price?.change ?? 0) >= 0 ? colors.long : colors.short;
+
+  const recentSignals = (history?.signals ?? []).slice(0, 6);
 
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: topPad + 16, paddingBottom: bottomPad + 100 },
+        { paddingTop: topPad + 12, paddingBottom: bottomPad + 100 },
       ]}
+      showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
           refreshing={isFetching && !isLoading}
@@ -60,251 +179,327 @@ export default function SignalScreen() {
         />
       }
     >
+      {/* ── PRICE + CHART ── */}
+      <View
+        style={[
+          styles.chartCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderRadius: colors.radius,
+          },
+        ]}
+      >
+        {/* Price header row */}
+        {price && (
+          <View style={styles.priceRow}>
+            <View>
+              <Text style={[styles.assetLabel, { color: colors.mutedForeground }]}>
+                XAU / USD
+              </Text>
+              <Text style={[styles.priceValue, { color: colors.foreground }]}>
+                ${price.price.toLocaleString("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </Text>
+            </View>
+            <View style={styles.priceRight}>
+              <View
+                style={[
+                  styles.changeBadge,
+                  {
+                    backgroundColor: changeColor + "22",
+                    borderColor: changeColor + "44",
+                  },
+                ]}
+              >
+                <Text style={[styles.changeText, { color: changeColor }]}>
+                  {price.change >= 0 ? "+" : ""}
+                  {price.changePercent.toFixed(2)}%
+                </Text>
+              </View>
+              <Text style={[styles.highLow, { color: colors.mutedForeground }]}>
+                H ${price.high24h.toFixed(0)} · L ${price.low24h.toFixed(0)}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Chart */}
+        <PriceChart data={priceBuffer} width={chartWidth - 32} height={120} />
+      </View>
+
+      {/* ── AI SIGNAL ── */}
       {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} size="large" />
+        <View style={styles.loadingRow}>
+          <ActivityIndicator color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>
-            Analysing market...
+            Analysing...
           </Text>
         </View>
       ) : error ? (
-        <View style={styles.center}>
-          <Text style={[styles.errorText, { color: colors.destructive }]}>
-            Failed to load signal
-          </Text>
-          <Text
-            style={[styles.retryText, { color: colors.primary }]}
-            onPress={() => refetch()}
-          >
-            Tap to retry
-          </Text>
-        </View>
-      ) : data ? (
+        <Text
+          style={[styles.errorText, { color: colors.destructive }]}
+          onPress={() => refetch()}
+        >
+          Failed to load signal — tap to retry
+        </Text>
+      ) : signal ? (
         <>
-          {/* Signal Hero */}
+          <SectionHeader title="AI Signal" />
           <View
             style={[
-              styles.heroCard,
+              styles.signalCard,
               {
                 backgroundColor: colors.card,
-                borderColor: signalColor + "44",
+                borderColor: signalColor + "55",
                 borderRadius: colors.radius,
               },
             ]}
           >
-            <View style={styles.heroTop}>
-              <SignalBadge signal={data.signal} size="lg" />
-              {data.smartMode && (
+            <View style={styles.signalTop}>
+              <SignalBadge signal={signal.signal} size="lg" />
+              {signal.smartMode && (
                 <View
                   style={[
                     styles.smartBadge,
-                    { backgroundColor: colors.primary + "22", borderColor: colors.primary + "55" },
+                    {
+                      backgroundColor: colors.primary + "22",
+                      borderColor: colors.primary + "55",
+                    },
                   ]}
                 >
                   <Text style={[styles.smartText, { color: colors.primary }]}>
-                    SMART MODE
+                    SMART
                   </Text>
                 </View>
               )}
+              <View style={styles.confRight}>
+                <Text style={[styles.confValue, { color: signalColor }]}>
+                  {signal.confidence.toFixed(0)}%
+                </Text>
+                <Text
+                  style={[styles.confLabel, { color: colors.mutedForeground }]}
+                >
+                  confidence
+                </Text>
+              </View>
             </View>
 
-            <Text style={[styles.confidence, { color: signalColor }]}>
-              {data.confidence.toFixed(0)}
-              <Text style={[styles.confidenceUnit, { color: colors.mutedForeground }]}>
-                % confidence
-              </Text>
-            </Text>
-
+            {/* Confidence bar */}
             <View
-              style={[
-                styles.confidenceBar,
-                { backgroundColor: colors.border },
-              ]}
+              style={[styles.confBar, { backgroundColor: colors.accent }]}
             >
               <View
                 style={[
-                  styles.confidenceFill,
+                  styles.confFill,
                   {
                     backgroundColor: signalColor,
-                    width: `${Math.min(data.confidence, 100)}%` as `${number}%`,
+                    width: `${Math.min(signal.confidence, 100)}%` as `${number}%`,
                   },
                 ]}
               />
             </View>
 
             <Text style={[styles.reason, { color: colors.foreground }]}>
-              {data.reason}
+              {signal.reason}
             </Text>
 
             <View style={styles.metaRow}>
               <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
-                {data.tradeDuration}
+                {signal.tradeDuration}
               </Text>
-              {data.cooldownRemaining > 0 && (
+              {signal.cooldownRemaining > 0 && (
                 <Text style={[styles.cooldown, { color: colors.warning }]}>
-                  Cooldown {Math.ceil(data.cooldownRemaining / 60)}m
+                  Cooldown {Math.ceil(signal.cooldownRemaining / 60)}m
                 </Text>
               )}
             </View>
-          </View>
 
-          {/* Trade Levels */}
-          {data.signal !== "HOLD" && (
-            <>
-              <SectionHeader title="Trade Levels" />
+            {/* Trade levels (only if actionable) */}
+            {signal.signal !== "HOLD" && (
               <View
                 style={[
-                  styles.card,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
-                    borderRadius: colors.radius,
-                  },
+                  styles.levelsGrid,
+                  { borderTopColor: colors.border },
                 ]}
               >
-                <PriceLevel
-                  label="Entry"
-                  price={data.entryPrice}
-                  color={colors.primary}
+                <View style={styles.levelItem}>
+                  <Text
+                    style={[styles.levelLabel, { color: colors.mutedForeground }]}
+                  >
+                    ENTRY
+                  </Text>
+                  <Text
+                    style={[styles.levelValue, { color: colors.primary }]}
+                  >
+                    ${signal.entryPrice.toFixed(2)}
+                  </Text>
+                </View>
+                <View
+                  style={[styles.levelDivider, { backgroundColor: colors.border }]}
                 />
-                <PriceLevel
-                  label="Take Profit"
-                  price={data.takeProfit}
-                  color={colors.long}
+                <View style={styles.levelItem}>
+                  <Text
+                    style={[styles.levelLabel, { color: colors.mutedForeground }]}
+                  >
+                    TP
+                  </Text>
+                  <Text style={[styles.levelValue, { color: colors.long }]}>
+                    ${signal.takeProfit.toFixed(2)}
+                  </Text>
+                </View>
+                <View
+                  style={[styles.levelDivider, { backgroundColor: colors.border }]}
                 />
-                <PriceLevel
-                  label="Stop Loss"
-                  price={data.stopLoss}
-                  color={colors.short}
-                />
+                <View style={styles.levelItem}>
+                  <Text
+                    style={[styles.levelLabel, { color: colors.mutedForeground }]}
+                  >
+                    SL
+                  </Text>
+                  <Text style={[styles.levelValue, { color: colors.short }]}>
+                    ${signal.stopLoss.toFixed(2)}
+                  </Text>
+                </View>
               </View>
-            </>
-          )}
-
-          {/* Market Trend */}
-          <SectionHeader title="Market Trend" />
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-                borderRadius: colors.radius,
-              },
-            ]}
-          >
-            <IndicatorRow
-              label="Overall Trend"
-              value={data.trend}
-              valueColor={trendColor(data.trend)}
-            />
-            <IndicatorRow
-              label="1H Trend"
-              value={data.indicators.trend1h}
-              valueColor={trendColor(data.indicators.trend1h)}
-            />
-            <IndicatorRow
-              label="15M Trend"
-              value={data.indicators.trend15m}
-              valueColor={trendColor(data.indicators.trend15m)}
-            />
-            <IndicatorRow
-              label="5M Trend"
-              value={data.indicators.trend5m}
-              valueColor={trendColor(data.indicators.trend5m)}
-            />
+            )}
           </View>
 
-          {/* Technical Indicators */}
-          <SectionHeader title="Indicators" />
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-                borderRadius: colors.radius,
-              },
-            ]}
-          >
-            <IndicatorRow
-              label="RSI (14)"
-              value={data.indicators.rsi.toFixed(1)}
-              valueColor={
-                data.indicators.rsi > 70
+          {/* Trend indicators — compact */}
+          <View style={styles.indicatorRow}>
+            {[
+              { label: "1H", value: signal.indicators.trend1h },
+              { label: "15M", value: signal.indicators.trend15m },
+              { label: "5M", value: signal.indicators.trend5m },
+              { label: "RSI", value: signal.indicators.rsi.toFixed(0) },
+            ].map(({ label, value }) => {
+              const isBull = value === "BULLISH";
+              const isBear = value === "BEARISH";
+              const c = isBull
+                ? colors.long
+                : isBear
                   ? colors.short
-                  : data.indicators.rsi < 30
-                    ? colors.long
-                    : colors.foreground
-              }
-            />
-            <IndicatorRow label="EMA 20" value={`$${data.indicators.ema20.toFixed(2)}`} />
-            <IndicatorRow label="EMA 50" value={`$${data.indicators.ema50.toFixed(2)}`} />
-            <IndicatorRow label="EMA 200" value={`$${data.indicators.ema200.toFixed(2)}`} />
-            <IndicatorRow
-              label="MACD"
-              value={data.indicators.macdLine.toFixed(2)}
-              valueColor={
-                data.indicators.macdLine > data.indicators.macdSignal
-                  ? colors.long
-                  : colors.short
-              }
-            />
-            <IndicatorRow label="ATR" value={data.indicators.atr.toFixed(2)} />
+                  : colors.mutedForeground;
+              return (
+                <View
+                  key={label}
+                  style={[
+                    styles.indCell,
+                    {
+                      backgroundColor: c + "15",
+                      borderColor: c + "33",
+                      borderRadius: 8,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.indLabel, { color: colors.mutedForeground }]}>
+                    {label}
+                  </Text>
+                  <Text style={[styles.indValue, { color: c }]}>{value}</Text>
+                </View>
+              );
+            })}
           </View>
-
-          <Text
-            style={[styles.timestamp, { color: colors.mutedForeground }]}
-          >
-            Updated {new Date(data.timestamp).toLocaleTimeString()}
-          </Text>
         </>
       ) : null}
+
+      {/* ── RECENT SIGNALS ── */}
+      {recentSignals.length > 0 && (
+        <>
+          <SectionHeader title="Recent Signals" />
+          <View
+            style={[
+              styles.historyCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                borderRadius: colors.radius,
+              },
+            ]}
+          >
+            {recentSignals.map((item, i) => (
+              <React.Fragment key={item.id}>
+                <HistoryRow item={item} />
+                {i < recentSignals.length - 1 && (
+                  <View
+                    style={[styles.divider, { backgroundColor: colors.border }]}
+                  />
+                )}
+              </React.Fragment>
+            ))}
+          </View>
+        </>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 16,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingTop: 80,
+  container: { flex: 1 },
+  content: { paddingHorizontal: 16 },
+
+  /* Chart */
+  chartCard: {
+    padding: 16,
+    borderWidth: 1,
     gap: 12,
   },
-  loadingText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 14,
-    marginTop: 12,
-  },
-  errorText: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 16,
-  },
-  retryText: {
-    fontFamily: "Inter_500Medium",
-    fontSize: 14,
-  },
-  heroCard: {
-    padding: 20,
-    borderWidth: 1,
-  },
-  heroTop: {
+  priceRow: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    alignItems: "flex-start",
   },
-  smartBadge: {
+  assetLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 11,
+    letterSpacing: 1.5,
+    marginBottom: 2,
+  },
+  priceValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 28,
+    letterSpacing: -0.5,
+  },
+  priceRight: { alignItems: "flex-end", gap: 4 },
+  changeBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 6,
+    borderWidth: 1,
+  },
+  changeText: { fontFamily: "Inter_700Bold", fontSize: 13 },
+  highLow: { fontFamily: "Inter_400Regular", fontSize: 11 },
+
+  /* Signal card */
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 16,
+  },
+  loadingText: { fontFamily: "Inter_400Regular", fontSize: 13 },
+  errorText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: "center",
+  },
+  signalCard: {
+    padding: 16,
+    borderWidth: 1,
+  },
+  signalTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  smartBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 5,
     borderWidth: 1,
   },
   smartText: {
@@ -312,52 +507,94 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 1,
   },
-  confidence: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 42,
-    lineHeight: 48,
-  },
-  confidenceUnit: {
-    fontSize: 16,
-    fontFamily: "Inter_400Regular",
-  },
-  confidenceBar: {
-    height: 4,
+  confRight: { marginLeft: "auto", alignItems: "flex-end" },
+  confValue: { fontFamily: "Inter_700Bold", fontSize: 28 },
+  confLabel: { fontFamily: "Inter_400Regular", fontSize: 11 },
+  confBar: {
+    height: 3,
     borderRadius: 2,
-    marginTop: 10,
-    marginBottom: 16,
+    marginBottom: 12,
     overflow: "hidden",
   },
-  confidenceFill: {
-    height: "100%",
-    borderRadius: 2,
-  },
+  confFill: { height: "100%", borderRadius: 2 },
   reason: {
     fontFamily: "Inter_400Regular",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 19,
   },
   metaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 12,
+    marginTop: 8,
   },
-  metaText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 12,
+  metaText: { fontFamily: "Inter_400Regular", fontSize: 12 },
+  cooldown: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
+  levelsGrid: {
+    flexDirection: "row",
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
   },
-  cooldown: {
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 12,
+  levelItem: { flex: 1, alignItems: "center", gap: 4 },
+  levelDivider: { width: 1, alignSelf: "stretch" },
+  levelLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 10,
+    letterSpacing: 1,
   },
-  card: {
-    paddingHorizontal: 16,
+  levelValue: { fontFamily: "Inter_700Bold", fontSize: 15 },
+
+  /* Indicator row */
+  indicatorRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+  indCell: {
+    flex: 1,
+    padding: 10,
+    alignItems: "center",
+    gap: 3,
     borderWidth: 1,
   },
-  timestamp: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 11,
-    textAlign: "center",
-    marginTop: 16,
+  indLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 10,
+    letterSpacing: 0.5,
   },
+  indValue: { fontFamily: "Inter_700Bold", fontSize: 12 },
+
+  /* History */
+  historyCard: { borderWidth: 1, overflow: "hidden" },
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  historyLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  historyTime: { fontFamily: "Inter_400Regular", fontSize: 12 },
+  historyEntry: { fontFamily: "Inter_600SemiBold", fontSize: 13 },
+  historyRight: {
+    alignItems: "flex-end",
+    gap: 3,
+  },
+  statusBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  statusText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 9,
+    letterSpacing: 0.6,
+  },
+  pnlText: { fontFamily: "Inter_700Bold", fontSize: 12 },
+  divider: { height: 1, marginHorizontal: 0 },
 });

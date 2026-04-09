@@ -5,7 +5,7 @@ import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 
 import { useColors } from "@/hooks/useColors";
 
@@ -14,15 +14,11 @@ function NativeTabLayout() {
     <NativeTabs>
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: "bolt", selected: "bolt.fill" }} />
-        <Label>Signal</Label>
+        <Label>Dashboard</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="price">
         <Icon sf={{ default: "chart.line.uptrend.xyaxis", selected: "chart.line.uptrend.xyaxis" }} />
         <Label>Price</Label>
-      </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="history">
-        <Icon sf={{ default: "list.bullet", selected: "list.bullet" }} />
-        <Label>History</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="analytics">
         <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
@@ -34,8 +30,6 @@ function NativeTabLayout() {
 
 function ClassicTabLayout() {
   const colors = useColors();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
 
@@ -59,7 +53,7 @@ function ClassicTabLayout() {
         },
         tabBarLabelStyle: {
           fontFamily: "Inter_500Medium",
-          fontSize: 10,
+          fontSize: 11,
         },
         tabBarBackground: () =>
           isIOS ? (
@@ -81,7 +75,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Signal",
+          title: "Dashboard",
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="bolt.fill" tintColor={color} size={22} />
@@ -103,18 +97,6 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="history"
-        options={{
-          title: "History",
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="list.bullet" tintColor={color} size={22} />
-            ) : (
-              <Feather name="list" size={20} color={color} />
-            ),
-        }}
-      />
-      <Tabs.Screen
         name="analytics"
         options={{
           title: "Analytics",
@@ -125,6 +107,11 @@ function ClassicTabLayout() {
               <Feather name="bar-chart-2" size={20} color={color} />
             ),
         }}
+      />
+      {/* History is embedded in Dashboard — hidden from tab bar */}
+      <Tabs.Screen
+        name="history"
+        options={{ href: null }}
       />
     </Tabs>
   );
