@@ -14,6 +14,7 @@
  *   [4] range_rel  = (high  - low) / ref   ← intra-bar volatility
  */
 import * as fs   from "fs";
+import * as path from "path";
 import { logger } from "./logger.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -24,8 +25,14 @@ const D1              = 16;   // Dense layer 1 size
 const NCLS            = 3;    // output classes
 const COMB            = HIDDEN + FEAT_SZ; // 37 — LSTM gate input size
 
-const MODEL_PATH   = "/tmp/lstm-model.json";
-const TRAIN_PATH   = "/tmp/lstm-training.json";
+// Persistent storage — survives server restarts (unlike /tmp)
+const DATA_DIR   = path.join(process.cwd(), ".lstm");
+const MODEL_PATH = path.join(DATA_DIR, "model.json");
+const TRAIN_PATH = path.join(DATA_DIR, "training.json");
+
+function ensureDataDir(): void {
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ok */ }
+}
 
 const LR           = 0.003;
 const BETA1        = 0.9;
@@ -473,6 +480,7 @@ function loadTrainingData(): TrainRecord[] {
 
 function saveTrainingData(records: TrainRecord[]): void {
   try {
+    ensureDataDir();
     const trimmed = records.slice(-MAX_RECORDS);
     fs.writeFileSync(TRAIN_PATH, JSON.stringify(trimmed));
   } catch (err) { logger.warn({ err }, "LSTM: failed to save training data"); }
@@ -488,6 +496,7 @@ function appendTrainingRecord(seq: LSTMCandle[], label: 0 | 1 | 2): void {
 // ── Model persistence ─────────────────────────────────────────────────────────
 function saveModel(): void {
   try {
+    ensureDataDir();
     fs.writeFileSync(MODEL_PATH, JSON.stringify({ weights, accuracy: modelAccuracy, trainedOn }));
     logger.info({ path: MODEL_PATH }, "LSTM: model saved");
   } catch (err) { logger.warn({ err }, "LSTM: save failed"); }
@@ -495,6 +504,7 @@ function saveModel(): void {
 
 function loadModel(): boolean {
   try {
+    ensureDataDir();
     if (!fs.existsSync(MODEL_PATH)) return false;
     const saved = JSON.parse(fs.readFileSync(MODEL_PATH, "utf8"));
     weights       = saved.weights;
@@ -629,4 +639,25 @@ export function getLSTMStatus(): { mlModelStatus: MLModelStatus; mlTrainedOn: nu
     mlTrainedOn:   trainedOn,
     mlAccuracy:    modelAccuracy,
   };
+}
+
+/**
+ * Seed the training dataset with a historical candle sequence + outcome.
+ * Used during bootstrap to pre-train from DB trade history.
+ * Returns false if we already have enough data and should skip.
+ */
+export function addBootstrapRecord(
+  candles: LSTMCandle[],
+  signal: "LONG" | "SHORT",
+  outcome: "TARGET_HIT" | "STOP_HIT"
+): void {
+  const label: 0 | 1 | 2 =
+    outcome === "TARGET_HIT" && signal === "LONG"  ? 0 :
+    outcome === "TARGET_HIT" && signal === "SHORT" ? 1 : 2;
+  appendTrainingRecord(candles, label);
+}
+
+/** How many training records are currently saved. */
+export function getTrainingRecordCount(): number {
+  return loadTrainingData().length;
 }
