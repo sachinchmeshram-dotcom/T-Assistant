@@ -81,6 +81,21 @@ export const GetHistoryResponse = zod.object({
       reason: zod.string(),
       timestamp: zod.string(),
       tradeDuration: zod.string(),
+      tradeStatus: zod
+        .enum(["RUNNING", "TARGET_HIT", "STOP_HIT", "HOLD"])
+        .describe("Trade outcome status"),
+      closedPrice: zod
+        .number()
+        .optional()
+        .describe("Price at which trade was closed (TP or SL hit)"),
+      closedAt: zod
+        .string()
+        .optional()
+        .describe("ISO timestamp when trade was closed"),
+      pnlPoints: zod
+        .number()
+        .optional()
+        .describe("Profit or loss in USD points"),
     }),
   ),
 });

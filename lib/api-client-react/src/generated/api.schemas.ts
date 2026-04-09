@@ -133,6 +133,19 @@ export const HistoryEntryTrend = {
   NEUTRAL: "NEUTRAL",
 } as const;
 
+/**
+ * Trade outcome status
+ */
+export type HistoryEntryTradeStatus =
+  (typeof HistoryEntryTradeStatus)[keyof typeof HistoryEntryTradeStatus];
+
+export const HistoryEntryTradeStatus = {
+  RUNNING: "RUNNING",
+  TARGET_HIT: "TARGET_HIT",
+  STOP_HIT: "STOP_HIT",
+  HOLD: "HOLD",
+} as const;
+
 export interface HistoryEntry {
   id: string;
   signal: HistoryEntrySignal;
@@ -144,6 +157,14 @@ export interface HistoryEntry {
   reason: string;
   timestamp: string;
   tradeDuration: string;
+  /** Trade outcome status */
+  tradeStatus: HistoryEntryTradeStatus;
+  /** Price at which trade was closed (TP or SL hit) */
+  closedPrice?: number;
+  /** ISO timestamp when trade was closed */
+  closedAt?: string;
+  /** Profit or loss in USD points */
+  pnlPoints?: number;
 }
 
 export interface HistoryResponse {

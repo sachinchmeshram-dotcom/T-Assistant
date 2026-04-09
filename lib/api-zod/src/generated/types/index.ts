@@ -10,6 +10,7 @@ export * from "./errorResponse";
 export * from "./healthStatus";
 export * from "./historyEntry";
 export * from "./historyEntrySignal";
+export * from "./historyEntryTradeStatus";
 export * from "./historyEntryTrend";
 export * from "./historyResponse";
 export * from "./indicators";

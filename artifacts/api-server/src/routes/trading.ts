@@ -180,6 +180,10 @@ router.get("/history", async (req, res) => {
       reason: r.reason,
       timestamp: r.createdAt.toISOString(),
       tradeDuration: r.tradeDuration,
+      tradeStatus: (r.tradeStatus ?? "RUNNING") as "RUNNING" | "TARGET_HIT" | "STOP_HIT" | "HOLD",
+      closedPrice: r.closedPrice ?? undefined,
+      closedAt: r.closedAt ? r.closedAt.toISOString() : undefined,
+      pnlPoints: r.pnlPoints ?? undefined,
     }));
 
     res.json({ signals });

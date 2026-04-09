@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { HistoryEntrySignal } from "./historyEntrySignal";
+import type { HistoryEntryTradeStatus } from "./historyEntryTradeStatus";
 import type { HistoryEntryTrend } from "./historyEntryTrend";
 
 export interface HistoryEntry {
@@ -19,4 +20,12 @@ export interface HistoryEntry {
   reason: string;
   timestamp: string;
   tradeDuration: string;
+  /** Trade outcome status */
+  tradeStatus: HistoryEntryTradeStatus;
+  /** Price at which trade was closed (TP or SL hit) */
+  closedPrice?: number;
+  /** ISO timestamp when trade was closed */
+  closedAt?: string;
+  /** Profit or loss in USD points */
+  pnlPoints?: number;
 }
