@@ -112,6 +112,8 @@ export interface SignalResponse {
   tradeDuration: string;
   /** Seconds remaining in cooldown period */
   cooldownRemaining: number;
+  /** Whether Smart Mode is currently active */
+  smartMode: boolean;
   indicators: Indicators;
 }
 
@@ -189,6 +191,58 @@ export interface PositionSizeResponse {
   positionValue: number;
   /** Value per pip */
   pipValue: number;
+}
+
+export interface SmartModeRequest {
+  /** Enable or disable Smart Mode */
+  enabled: boolean;
+}
+
+export type TradeRecordSignal =
+  (typeof TradeRecordSignal)[keyof typeof TradeRecordSignal];
+
+export const TradeRecordSignal = {
+  LONG: "LONG",
+  SHORT: "SHORT",
+} as const;
+
+export type TradeRecordResult =
+  (typeof TradeRecordResult)[keyof typeof TradeRecordResult];
+
+export const TradeRecordResult = {
+  WIN: "WIN",
+  LOSS: "LOSS",
+} as const;
+
+export interface TradeRecord {
+  id: number;
+  signal: TradeRecordSignal;
+  result: TradeRecordResult;
+  entryPrice: number;
+  closedPrice: number;
+  pnlPoints: number;
+  timestamp: string;
+}
+
+export interface AnalyticsResponse {
+  /** Total completed trades */
+  totalCompleted: number;
+  wins: number;
+  losses: number;
+  /** Win rate as a percentage (0-100) */
+  winRate: number;
+  lossRate: number;
+  /** Average profit on winning trades (USD points) */
+  avgProfit: number;
+  /** Average loss on losing trades (USD points) */
+  avgLoss: number;
+  /** Expected value per trade */
+  expectancy: number;
+  last10: TradeRecord[];
+  smartMode: boolean;
+  smartModeStatus: string;
+  learningStatus: string;
+  sufficientData: boolean;
 }
 
 export interface ErrorResponse {

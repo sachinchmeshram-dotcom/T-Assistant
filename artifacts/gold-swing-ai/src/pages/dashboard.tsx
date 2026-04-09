@@ -4,6 +4,7 @@ import { SignalPanel } from "@/components/trading/signal-panel";
 import { IndicatorsRow } from "@/components/trading/indicators-row";
 import { PositionSizer } from "@/components/trading/position-sizer";
 import { HistoryTable } from "@/components/trading/history-table";
+import { AnalyticsPanel } from "@/components/trading/analytics-panel";
 import { motion } from "framer-motion";
 
 export default function Dashboard() {
@@ -46,9 +47,10 @@ export default function Dashboard() {
           <IndicatorsRow />
         </motion.div>
 
-        {/* Bottom Section: History + Position Sizer */}
+        {/* Bottom Section: History + Right Panel */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 pb-12">
           
+          {/* Signal History */}
           <motion.div 
             className="lg:col-span-8"
             initial={{ opacity: 0, y: 20 }}
@@ -58,14 +60,24 @@ export default function Dashboard() {
             <HistoryTable />
           </motion.div>
 
-          <motion.div 
-            className="lg:col-span-4"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
-          >
-            <PositionSizer />
-          </motion.div>
+          {/* Right column: AI Learning + Position Sizer */}
+          <div className="lg:col-span-4 flex flex-col gap-6">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.35 }}
+            >
+              <AnalyticsPanel />
+            </motion.div>
+
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+            >
+              <PositionSizer />
+            </motion.div>
+          </div>
 
         </div>
       </main>

@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { fetchGoldPrice } from "../lib/goldPrice.js";
 import { generateSignal } from "../lib/signalEngine.js";
 import { startTradeTracker } from "../lib/tradeTracker.js";
+import { getAnalyticsSummary, setSmartMode } from "../lib/performanceAnalytics.js";
 import { db, signalsTable } from "@workspace/db";
 import { CalculatePositionSizeBody } from "@workspace/api-zod";
 import { desc } from "drizzle-orm";
@@ -191,6 +192,27 @@ router.get("/history", async (req, res) => {
     req.log.error({ err }, "Error fetching history");
     res.json({ signals: [] });
   }
+});
+
+router.get("/analytics", async (req, res) => {
+  try {
+    const analytics = await getAnalyticsSummary();
+    res.json(analytics);
+  } catch (err) {
+    req.log.error({ err }, "Error fetching analytics");
+    res.status(500).json({ error: "analytics_error", message: "Failed to fetch analytics" });
+  }
+});
+
+router.post("/analytics/smart-mode", async (req, res) => {
+  const { enabled } = req.body as { enabled: boolean };
+  if (typeof enabled !== "boolean") {
+    res.status(400).json({ error: "validation_error", message: "enabled must be a boolean" });
+    return;
+  }
+  setSmartMode(enabled);
+  const analytics = await getAnalyticsSummary(true);
+  res.json(analytics);
 });
 
 router.post("/position-size", (req, res) => {

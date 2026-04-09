@@ -30,5 +30,7 @@ export interface SignalResponse {
   tradeDuration: string;
   /** Seconds remaining in cooldown period */
   cooldownRemaining: number;
+  /** Whether Smart Mode is currently active */
+  smartMode: boolean;
   indicators: Indicators;
 }

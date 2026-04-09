@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./analyticsResponse";
 export * from "./errorResponse";
 export * from "./healthStatus";
 export * from "./historyEntry";
@@ -23,3 +24,7 @@ export * from "./priceResponse";
 export * from "./signalResponse";
 export * from "./signalResponseSignal";
 export * from "./signalResponseTrend";
+export * from "./smartModeRequest";
+export * from "./tradeRecord";
+export * from "./tradeRecordResult";
+export * from "./tradeRecordSignal";

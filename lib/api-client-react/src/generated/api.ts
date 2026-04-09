@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AnalyticsResponse,
   ErrorResponse,
   HealthStatus,
   HistoryResponse,
@@ -24,6 +25,7 @@ import type {
   PositionSizeResponse,
   PriceResponse,
   SignalResponse,
+  SmartModeRequest,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -322,6 +324,169 @@ export function useGetHistory<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Returns performance analytics, win rate, and smart mode status
+ * @summary Get AI learning analytics
+ */
+export const getGetAnalyticsUrl = () => {
+  return `/api/analytics`;
+};
+
+export const getAnalytics = async (
+  options?: RequestInit,
+): Promise<AnalyticsResponse> => {
+  return customFetch<AnalyticsResponse>(getGetAnalyticsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAnalyticsQueryKey = () => {
+  return [`/api/analytics`] as const;
+};
+
+export const getGetAnalyticsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalytics>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalytics>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAnalyticsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalytics>>> = ({
+    signal,
+  }) => getAnalytics({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalytics>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalyticsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAnalytics>>
+>;
+export type GetAnalyticsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get AI learning analytics
+ */
+
+export function useGetAnalytics<
+  TData = Awaited<ReturnType<typeof getAnalytics>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalytics>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalyticsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Enable or disable strict signal filtering
+ * @summary Toggle Smart Mode
+ */
+export const getSetSmartModeUrl = () => {
+  return `/api/analytics/smart-mode`;
+};
+
+export const setSmartMode = async (
+  smartModeRequest: SmartModeRequest,
+  options?: RequestInit,
+): Promise<AnalyticsResponse> => {
+  return customFetch<AnalyticsResponse>(getSetSmartModeUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(smartModeRequest),
+  });
+};
+
+export const getSetSmartModeMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setSmartMode>>,
+    TError,
+    { data: BodyType<SmartModeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setSmartMode>>,
+  TError,
+  { data: BodyType<SmartModeRequest> },
+  TContext
+> => {
+  const mutationKey = ["setSmartMode"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setSmartMode>>,
+    { data: BodyType<SmartModeRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return setSmartMode(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetSmartModeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setSmartMode>>
+>;
+export type SetSmartModeMutationBody = BodyType<SmartModeRequest>;
+export type SetSmartModeMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Toggle Smart Mode
+ */
+export const useSetSmartMode = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setSmartMode>>,
+    TError,
+    { data: BodyType<SmartModeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof setSmartMode>>,
+  TError,
+  { data: BodyType<SmartModeRequest> },
+  TContext
+> => {
+  return useMutation(getSetSmartModeMutationOptions(options));
+};
 
 /**
  * Calculates position size based on account balance and risk percentage

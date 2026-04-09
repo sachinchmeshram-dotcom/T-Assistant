@@ -65,6 +65,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HistoryResponse"
+  /analytics:
+    get:
+      operationId: getAnalytics
+      tags: [trading]
+      summary: Get AI learning analytics
+      description: Returns performance analytics, win rate, and smart mode status
+      responses:
+        "200":
+          description: Analytics data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsResponse"
+  /analytics/smart-mode:
+    post:
+      operationId: setSmartMode
+      tags: [trading]
+      summary: Toggle Smart Mode
+      description: Enable or disable strict signal filtering
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmartModeRequest"
+      responses:
+        "200":
+          description: Smart mode updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsResponse"
   /position-size:
     post:
       operationId: calculatePositionSize
@@ -162,6 +194,9 @@ components:
         cooldownRemaining:
           type: number
           description: Seconds remaining in cooldown period
+        smartMode:
+          type: boolean
+          description: Whether Smart Mode is currently active
         indicators:
           $ref: "#/components/schemas/Indicators"
       required:
@@ -175,6 +210,7 @@ components:
         - timestamp
         - tradeDuration
         - cooldownRemaining
+        - smartMode
         - indicators
     Indicators:
       type: object
@@ -313,6 +349,91 @@ components:
         - riskAmount
         - positionValue
         - pipValue
+    SmartModeRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Enable or disable Smart Mode
+      required:
+        - enabled
+    TradeRecord:
+      type: object
+      properties:
+        id:
+          type: number
+        signal:
+          type: string
+          enum: [LONG, SHORT]
+        result:
+          type: string
+          enum: [WIN, LOSS]
+        entryPrice:
+          type: number
+        closedPrice:
+          type: number
+        pnlPoints:
+          type: number
+        timestamp:
+          type: string
+      required:
+        - id
+        - signal
+        - result
+        - entryPrice
+        - closedPrice
+        - pnlPoints
+        - timestamp
+    AnalyticsResponse:
+      type: object
+      properties:
+        totalCompleted:
+          type: number
+          description: Total completed trades
+        wins:
+          type: number
+        losses:
+          type: number
+        winRate:
+          type: number
+          description: Win rate as a percentage (0-100)
+        lossRate:
+          type: number
+        avgProfit:
+          type: number
+          description: Average profit on winning trades (USD points)
+        avgLoss:
+          type: number
+          description: Average loss on losing trades (USD points)
+        expectancy:
+          type: number
+          description: Expected value per trade
+        last10:
+          type: array
+          items:
+            $ref: "#/components/schemas/TradeRecord"
+        smartMode:
+          type: boolean
+        smartModeStatus:
+          type: string
+        learningStatus:
+          type: string
+        sufficientData:
+          type: boolean
+      required:
+        - totalCompleted
+        - wins
+        - losses
+        - winRate
+        - lossRate
+        - avgProfit
+        - avgLoss
+        - expectancy
+        - last10
+        - smartMode
+        - smartModeStatus
+        - learningStatus
+        - sufficientData
     ErrorResponse:
       type: object
       properties:

@@ -49,6 +49,7 @@ export const GetSignalResponse = zod.object({
   cooldownRemaining: zod
     .number()
     .describe("Seconds remaining in cooldown period"),
+  smartMode: zod.boolean().describe("Whether Smart Mode is currently active"),
   indicators: zod.object({
     rsi: zod.number().describe("RSI 14 value"),
     ema20: zod.number(),
@@ -98,6 +99,74 @@ export const GetHistoryResponse = zod.object({
         .describe("Profit or loss in USD points"),
     }),
   ),
+});
+
+/**
+ * Returns performance analytics, win rate, and smart mode status
+ * @summary Get AI learning analytics
+ */
+export const GetAnalyticsResponse = zod.object({
+  totalCompleted: zod.number().describe("Total completed trades"),
+  wins: zod.number(),
+  losses: zod.number(),
+  winRate: zod.number().describe("Win rate as a percentage (0-100)"),
+  lossRate: zod.number(),
+  avgProfit: zod
+    .number()
+    .describe("Average profit on winning trades (USD points)"),
+  avgLoss: zod.number().describe("Average loss on losing trades (USD points)"),
+  expectancy: zod.number().describe("Expected value per trade"),
+  last10: zod.array(
+    zod.object({
+      id: zod.number(),
+      signal: zod.enum(["LONG", "SHORT"]),
+      result: zod.enum(["WIN", "LOSS"]),
+      entryPrice: zod.number(),
+      closedPrice: zod.number(),
+      pnlPoints: zod.number(),
+      timestamp: zod.string(),
+    }),
+  ),
+  smartMode: zod.boolean(),
+  smartModeStatus: zod.string(),
+  learningStatus: zod.string(),
+  sufficientData: zod.boolean(),
+});
+
+/**
+ * Enable or disable strict signal filtering
+ * @summary Toggle Smart Mode
+ */
+export const SetSmartModeBody = zod.object({
+  enabled: zod.boolean().describe("Enable or disable Smart Mode"),
+});
+
+export const SetSmartModeResponse = zod.object({
+  totalCompleted: zod.number().describe("Total completed trades"),
+  wins: zod.number(),
+  losses: zod.number(),
+  winRate: zod.number().describe("Win rate as a percentage (0-100)"),
+  lossRate: zod.number(),
+  avgProfit: zod
+    .number()
+    .describe("Average profit on winning trades (USD points)"),
+  avgLoss: zod.number().describe("Average loss on losing trades (USD points)"),
+  expectancy: zod.number().describe("Expected value per trade"),
+  last10: zod.array(
+    zod.object({
+      id: zod.number(),
+      signal: zod.enum(["LONG", "SHORT"]),
+      result: zod.enum(["WIN", "LOSS"]),
+      entryPrice: zod.number(),
+      closedPrice: zod.number(),
+      pnlPoints: zod.number(),
+      timestamp: zod.string(),
+    }),
+  ),
+  smartMode: zod.boolean(),
+  smartModeStatus: zod.string(),
+  learningStatus: zod.string(),
+  sufficientData: zod.boolean(),
 });
 
 /**
