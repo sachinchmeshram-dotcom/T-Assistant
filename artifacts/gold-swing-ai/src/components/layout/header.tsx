@@ -78,11 +78,13 @@ export function Header() {
                 />
                 <span className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">
                   XAUUSD · {connected
-                    ? (data?.source === "polygon"
-                        ? "POLYGON · LIVE"
-                        : transport === "websocket"
-                          ? "WS · LIVE"
-                          : "LIVE")
+                    ? (data?.source === "finnhub"
+                        ? "FINNHUB · LIVE"
+                        : data?.source === "polygon"
+                          ? "POLYGON · LIVE"
+                          : transport === "websocket"
+                            ? "WS · LIVE"
+                            : "LIVE")
                     : error ? "RECONNECTING" : "CONNECTING…"}
                 </span>
               </div>

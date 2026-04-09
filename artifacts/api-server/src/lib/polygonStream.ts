@@ -4,14 +4,17 @@ import { fetchGoldPrice } from "./goldPrice.js";
 import { logger } from "./logger.js";
 
 const SPREAD = 0.35;
-const POLYGON_WS_URL = "wss://socket.polygon.io/forex";
-const RECONNECT_DELAY_BASE = 10_000; // Start at 10s — avoid rapid-fire loops
-const RECONNECT_DELAY_MAX  = 300_000; // Cap at 5 min if Polygon plan doesn't support forex
+const FINNHUB_WS_BASE = "wss://ws.finnhub.io";
+// Finnhub free-tier symbol for XAU/USD via OANDA feed
+const GOLD_SYMBOL = "OANDA:XAU_USD";
+
+const RECONNECT_DELAY_BASE = 5_000;
+const RECONNECT_DELAY_MAX  = 120_000;
 
 let ws: WebSocket | null = null;
 let reconnectDelay = RECONNECT_DELAY_BASE;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let polygonConnected = false;
+let finnhubConnected = false;
 let fallbackTimer: ReturnType<typeof setInterval> | null = null;
 
 // ── Goldprice.org fallback polling ─────────────────────────────────────────
@@ -19,7 +22,7 @@ function startFallbackPolling() {
   if (fallbackTimer) return;
   logger.info("Starting goldprice.org fallback polling (500ms)");
   fallbackTimer = setInterval(async () => {
-    if (polygonConnected) return; // Polygon is live — skip
+    if (finnhubConnected) return;
     try {
       const raw = await fetchGoldPrice();
       const live = buildLivePrice(raw, SPREAD, "goldprice");
@@ -34,116 +37,76 @@ function stopFallbackPolling() {
   if (fallbackTimer) {
     clearInterval(fallbackTimer);
     fallbackTimer = null;
-    logger.info("Fallback polling stopped (Polygon.io is live)");
+    logger.info("Fallback polling stopped (Finnhub is live)");
   }
 }
 
-// ── Polygon.io message handlers ────────────────────────────────────────────
+// ── Finnhub message handler ────────────────────────────────────────────────
 function handleMessage(raw: string) {
-  let events: unknown[];
-  try { events = JSON.parse(raw); } catch { return; }
-  if (!Array.isArray(events)) return;
+  let msg: unknown;
+  try { msg = JSON.parse(raw); } catch { return; }
+  if (typeof msg !== "object" || msg === null) return;
 
-  for (const ev of events as Record<string, unknown>[]) {
-    const type = ev["ev"] as string;
+  const ev = msg as Record<string, unknown>;
+  const type = ev["type"] as string;
 
-    if (type === "connected") {
-      // Send auth
-      ws?.send(JSON.stringify({
-        action: "auth",
-        params: process.env["POLYGON_API_KEY"] ?? "",
-      }));
-      continue;
-    }
+  // Trade tick — this is the real-time price
+  if (type === "trade") {
+    const ticks = ev["data"] as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(ticks) || ticks.length === 0) return;
 
-    if (type === "status") {
-      const status = ev["status"] as string;
-      if (status === "auth_success") {
-        logger.info("Polygon.io auth success — subscribing to C.C:XAUUSD");
-        ws?.send(JSON.stringify({
-          action: "subscribe",
-          params: "C.C:XAUUSD",
-        }));
-      } else if (status === "auth_failed") {
-        logger.error("Polygon.io auth failed — check POLYGON_API_KEY");
-        ws?.close();
-      } else if (status === "success") {
-        logger.info({ msg: ev["message"] }, "Polygon.io subscription confirmed");
-        polygonConnected = true;
-        reconnectDelay = RECONNECT_DELAY_BASE;
-        stopFallbackPolling();
-      }
-      continue;
-    }
+    // Use the latest tick in the batch
+    const tick = ticks[ticks.length - 1];
+    const price = tick["p"] as number | undefined;
+    const t     = tick["t"] as number | undefined;
+    if (!price) return;
 
-    // Forex quote: ev === "C"
-    if (type === "C") {
-      const ask = ev["a"] as number | undefined;
-      const bid = ev["b"] as number | undefined;
-      const t   = ev["t"] as number | undefined;
-      if (!ask || !bid) continue;
+    const live: LivePrice = {
+      price:         +price.toFixed(2),
+      bid:           +(price - SPREAD / 2).toFixed(2),
+      ask:           +(price + SPREAD / 2).toFixed(2),
+      spread:        SPREAD,
+      change:        0,
+      changePercent: 0,
+      high24h:       +price.toFixed(2),
+      low24h:        +price.toFixed(2),
+      timestamp:     t ? new Date(t).toISOString() : new Date().toISOString(),
+      direction:     "unchanged",
+      ms:            t ?? Date.now(),
+      source:        "polygon", // reusing "polygon" tag — will rename to "finnhub" below
+    };
+    // Override source tag
+    (live as any).source = "finnhub";
+    setLatestPrice(live);
+    return;
+  }
 
-      const mid = +((ask + bid) / 2).toFixed(2);
-      const live: LivePrice = {
-        price: mid,
-        bid: +bid.toFixed(2),
-        ask: +ask.toFixed(2),
-        spread: +(ask - bid).toFixed(2),
-        change: 0,
-        changePercent: 0,
-        high24h: mid,
-        low24h: mid,
-        timestamp: t ? new Date(t).toISOString() : new Date().toISOString(),
-        direction: "unchanged",
-        ms: t ?? Date.now(),
-        source: "polygon",
-      };
-      setLatestPrice(live);
-      continue;
-    }
-
-    // Per-second aggregate: ev === "CAS"
-    if (type === "CAS") {
-      const close = ev["c"] as number | undefined;
-      const high  = ev["h"] as number | undefined;
-      const low   = ev["l"] as number | undefined;
-      const t     = ev["s"] as number | undefined;
-      if (!close) continue;
-
-      const live: LivePrice = {
-        price: +close.toFixed(2),
-        bid:   +(close - SPREAD / 2).toFixed(2),
-        ask:   +(close + SPREAD / 2).toFixed(2),
-        spread: SPREAD,
-        change: 0,
-        changePercent: 0,
-        high24h: high ?? close,
-        low24h:  low  ?? close,
-        timestamp: t ? new Date(t).toISOString() : new Date().toISOString(),
-        direction: "unchanged",
-        ms: t ?? Date.now(),
-        source: "polygon",
-      };
-      setLatestPrice(live);
-      continue;
-    }
+  if (type === "error") {
+    logger.error({ msg: ev["msg"] }, "Finnhub WebSocket error message");
+    return;
   }
 }
 
 // ── Connection management ──────────────────────────────────────────────────
 function connect() {
-  if (!process.env["POLYGON_API_KEY"]) {
-    logger.warn("POLYGON_API_KEY not set — using goldprice.org fallback only");
+  const apiKey = process.env["FINNHUB_API_KEY"];
+  if (!apiKey) {
+    logger.warn("FINNHUB_API_KEY not set — using goldprice.org fallback only");
     startFallbackPolling();
     return;
   }
 
-  logger.info({ url: POLYGON_WS_URL }, "Connecting to Polygon.io forex WebSocket…");
+  const url = `${FINNHUB_WS_BASE}?token=${apiKey}`;
+  logger.info("Connecting to Finnhub WebSocket for real-time XAU/USD ticks…");
 
-  ws = new WebSocket(POLYGON_WS_URL);
+  ws = new WebSocket(url);
 
   ws.on("open", () => {
-    logger.info("Polygon.io WebSocket connected");
+    logger.info("Finnhub WebSocket connected — subscribing to XAUUSD");
+    ws?.send(JSON.stringify({ type: "subscribe", symbol: GOLD_SYMBOL }));
+    finnhubConnected = true;
+    reconnectDelay = RECONNECT_DELAY_BASE;
+    stopFallbackPolling();
   });
 
   ws.on("message", (data: WebSocket.RawData) => {
@@ -151,13 +114,13 @@ function connect() {
   });
 
   ws.on("error", (err) => {
-    logger.warn({ err: err.message }, "Polygon.io WebSocket error");
+    logger.warn({ err: err.message }, "Finnhub WebSocket error");
   });
 
   ws.on("close", (code, reason) => {
-    polygonConnected = false;
-    logger.warn({ code, reason: reason.toString() }, "Polygon.io disconnected — reconnecting…");
-    startFallbackPolling(); // Resume fallback while reconnecting
+    finnhubConnected = false;
+    logger.warn({ code, reason: reason.toString() }, "Finnhub disconnected — will reconnect");
+    startFallbackPolling();
     scheduleReconnect();
   });
 }
@@ -167,11 +130,11 @@ function scheduleReconnect() {
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
-    reconnectDelay = Math.min(reconnectDelay * 1.5, RECONNECT_DELAY_MAX);
+    reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_DELAY_MAX);
   }, reconnectDelay);
 }
 
 export function startPolygonStream() {
-  startFallbackPolling(); // Always start fallback first
-  connect();              // Then try Polygon.io (takes over when authenticated)
+  startFallbackPolling();
+  connect();
 }

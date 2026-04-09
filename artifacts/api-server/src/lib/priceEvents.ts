@@ -7,7 +7,7 @@ export interface LivePrice extends PriceData {
   spread: number;
   direction: "up" | "down" | "unchanged";
   ms: number;
-  source: "polygon" | "goldprice" | "yahoo" | "synthetic";
+  source: "finnhub" | "polygon" | "goldprice" | "yahoo" | "synthetic";
 }
 
 class PriceEventEmitter extends EventEmitter {}
