@@ -42,7 +42,10 @@ const EPOCHS       = 100;
 const BATCH        = 8;
 const CLIP         = 5.0;    // gradient norm clipping
 const MIN_SAMPLES  = 15;
-const RETRAIN_EVERY = 30;
+const RETRAIN_EVERY = 20;    // retrain after every 20 new trade outcomes
+const MAX_RECORDS  = 100;    // keep only the most recent 100 training records
+const MIN_CONF_TO_LEARN = 50; // ignore trades where LSTM confidence was < 50 %
+const AUTO_RETRAIN_MS = 60_000; // periodic retrain interval (1 minute)
 const LSTM_THRESHOLD = 60;   // % confidence to enable LSTM signal
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -96,9 +99,12 @@ let modelAccuracy:number = 0;
 let training = false;
 let closedAtLastTrain = 0;
 
-// Sequence capture — hold the last 50 raw candles from signal generation
-let lastRawSequence: LSTMCandle[] | null = null;
-const captureBuffer = new Map<number, LSTMCandle[]>(); // tradeId → candles
+// Sequence + confidence capture — stored at prediction time, retrieved on trade open
+let lastRawSequence:   LSTMCandle[] | null = null;
+let lastRawConfidence: number = 0; // LSTM confidence (%) at last prediction
+
+interface CaptureEntry { candles: LSTMCandle[]; confidence: number; }
+const captureBuffer = new Map<number, CaptureEntry>(); // tradeId → entry
 
 // ── Math helpers ──────────────────────────────────────────────────────────────
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
@@ -469,7 +475,6 @@ async function trainFromRecords(): Promise<void> {
 }
 
 // ── Training data persistence ─────────────────────────────────────────────────
-const MAX_RECORDS = 500;
 
 function loadTrainingData(): TrainRecord[] {
   try {
@@ -578,6 +583,9 @@ export function predictLSTM(candles: LSTMCandle[]): LSTMPrediction {
     const signal   = idx === 0 ? "LONG" : idx === 1 ? "SHORT" : "NO_TRADE";
     const confidence = Math.round(maxP * 100);
 
+    // Track the last confidence for quality-gated learning
+    lastRawConfidence = confidence;
+
     return {
       signal, confidence, pLong, pShort, pNoTrade,
       modelStatus: "trained", trainedOn, accuracy: modelAccuracy,
@@ -588,34 +596,44 @@ export function predictLSTM(candles: LSTMCandle[]): LSTMPrediction {
 
 /**
  * Call after saving a new LONG/SHORT trade to DB.
- * Associates the last predicted candle sequence with this trade ID.
+ * Associates the last predicted candle sequence + confidence with this trade ID.
  */
 export function captureSequenceForTrade(tradeId: number): void {
   if (lastRawSequence && lastRawSequence.length === SEQ_LEN) {
-    captureBuffer.set(tradeId, lastRawSequence);
-    logger.debug({ tradeId }, "LSTM: sequence captured for trade");
+    captureBuffer.set(tradeId, { candles: lastRawSequence, confidence: lastRawConfidence });
+    logger.debug({ tradeId, confidence: lastRawConfidence }, "LSTM: sequence captured for trade");
   }
 }
 
 /**
  * Call when a trade closes with its outcome.
- * Stores the candle sequence + outcome as a training record.
+ * Stores the candle sequence + outcome as a training record —
+ * ONLY if the LSTM was confident enough when it predicted (quality gate).
  */
 export function recordTradeOutcome(
   tradeId: number,
   signal: string,       // "LONG" | "SHORT"
   tradeStatus: string   // "TARGET_HIT" | "STOP_HIT"
 ): void {
-  const seq = captureBuffer.get(tradeId);
+  const entry = captureBuffer.get(tradeId);
   captureBuffer.delete(tradeId);
-  if (!seq) return;
+  if (!entry) return;
+
+  // Quality gate: skip low-confidence predictions to keep dataset clean
+  if (entry.confidence < MIN_CONF_TO_LEARN) {
+    logger.debug(
+      { tradeId, confidence: entry.confidence, threshold: MIN_CONF_TO_LEARN },
+      "LSTM: skipping low-confidence trade record"
+    );
+    return;
+  }
 
   const label: 0 | 1 | 2 =
     tradeStatus === "TARGET_HIT" && signal === "LONG"  ? 0 :
     tradeStatus === "TARGET_HIT" && signal === "SHORT" ? 1 : 2;
 
-  appendTrainingRecord(seq, label);
-  logger.info({ tradeId, signal, tradeStatus, label }, "LSTM: training record added");
+  appendTrainingRecord(entry.candles, label);
+  logger.info({ tradeId, signal, tradeStatus, label, confidence: entry.confidence }, "LSTM: training record added");
 }
 
 /** Retrain if enough new outcomes have accumulated since last training. */
@@ -660,4 +678,25 @@ export function addBootstrapRecord(
 /** How many training records are currently saved. */
 export function getTrainingRecordCount(): number {
   return loadTrainingData().length;
+}
+
+/**
+ * Start a 60-second periodic retraining loop.
+ * Retrains whenever the model is untrained or new data has arrived since last train.
+ * Call once at server startup.
+ */
+export function startAutoRetrain(): void {
+  setInterval(() => {
+    if (training) return;
+    const all = loadTrainingData();
+    const newSince = all.length - closedAtLastTrain;
+    const shouldRetrain =
+      (modelStatus === "untrained" && all.length >= MIN_SAMPLES) ||
+      (all.length >= MIN_SAMPLES && newSince > 0);
+    if (shouldRetrain) {
+      logger.info({ records: all.length, newSince }, "LSTM auto-retrain: triggered by 1-min timer");
+      trainFromRecords().catch(err => logger.error({ err }, "LSTM auto-retrain failed"));
+    }
+  }, AUTO_RETRAIN_MS);
+  logger.info({ intervalMs: AUTO_RETRAIN_MS }, "LSTM: auto-retrain loop started");
 }

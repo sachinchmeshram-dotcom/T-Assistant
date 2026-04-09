@@ -5,7 +5,7 @@ import { startTradeTracker } from "../lib/tradeTracker.js";
 import { getAnalyticsSummary, setSmartMode } from "../lib/performanceAnalytics.js";
 import { priceEmitter, getLatestPrice, type LivePrice } from "../lib/priceEvents.js";
 import { broadcastToWebSocketClients } from "../lib/priceWebSocket.js";
-import { initLSTM, captureSequenceForTrade } from "../lib/lstmModel.js";
+import { initLSTM, captureSequenceForTrade, startAutoRetrain } from "../lib/lstmModel.js";
 import { bootstrapLSTMFromDB } from "../lib/lstmBootstrap.js";
 import { db, signalsTable } from "@workspace/db";
 import { desc } from "drizzle-orm";
@@ -14,9 +14,10 @@ import { logger } from "../lib/logger.js";
 // Start background trade outcome tracker
 startTradeTracker();
 
-// Initialise LSTM time-series model (async — non-blocking)
+// Initialise LSTM, seed from DB history if needed, then start auto-retrain loop
 initLSTM()
   .then(() => bootstrapLSTMFromDB())
+  .then(() => startAutoRetrain())
   .catch(err => logger.error({ err }, "LSTM init/bootstrap failed"));
 
 const router: IRouter = Router();
