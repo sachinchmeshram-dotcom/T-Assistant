@@ -83,14 +83,20 @@ router.get("/signal", async (req, res) => {
     if (signal.signal !== "HOLD") {
       try {
         await db.insert(signalsTable).values({
-          signal: signal.signal,
-          confidence: signal.confidence,
-          entryPrice: signal.entryPrice,
-          stopLoss: signal.stopLoss,
-          takeProfit: signal.takeProfit,
-          trend: signal.trend,
-          reason: signal.reason,
-          tradeDuration: signal.tradeDuration,
+          signal:          signal.signal,
+          confidence:      signal.confidence,
+          entryPrice:      signal.entryPrice,
+          stopLoss:        signal.stopLoss,
+          takeProfit:      signal.takeProfit,
+          trend:           signal.trend,
+          reason:          signal.reason,
+          tradeDuration:   signal.tradeDuration,
+          // SMC condition columns — power the adaptive learning engine
+          marketStructure: signal.marketStructure,
+          bosPresent:      signal.bos,
+          liquiditySweep:  signal.liquiditySweep,
+          inOrderBlock:    signal.inOrderBlock,
+          smcScore:        signal.smcScore,
         });
       } catch (dbErr) {
         req.log.warn({ dbErr }, "Failed to persist signal to DB");

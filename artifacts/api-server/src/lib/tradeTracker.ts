@@ -1,17 +1,24 @@
 import { db, signalsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
+import { getLatestPrice } from "./priceEvents.js";
 import { fetchGoldPrice } from "./goldPrice.js";
 import { logger } from "./logger.js";
 
 const TRACKER_INTERVAL = 10_000; // 10 seconds
 
 async function checkRunningTrades() {
+  // Prefer live Finnhub tick; fall back to REST poll
   let currentPrice: number;
   try {
-    const priceData = await fetchGoldPrice();
-    currentPrice = priceData.price;
+    const live = getLatestPrice();
+    if (live) {
+      currentPrice = live.price;
+    } else {
+      const priceData = await fetchGoldPrice();
+      currentPrice = priceData.price;
+    }
   } catch {
-    return; // Skip check if price unavailable
+    return;
   }
 
   try {
@@ -31,21 +38,21 @@ async function checkRunningTrades() {
 
       if (signal === "LONG") {
         if (currentPrice >= takeProfit) {
-          newStatus  = "TARGET_HIT";
+          newStatus   = "TARGET_HIT";
           closedPrice = takeProfit;
           pnlPoints   = +(takeProfit - entryPrice).toFixed(2);
         } else if (currentPrice <= stopLoss) {
-          newStatus  = "STOP_HIT";
+          newStatus   = "STOP_HIT";
           closedPrice = stopLoss;
           pnlPoints   = +(stopLoss - entryPrice).toFixed(2);
         }
       } else if (signal === "SHORT") {
         if (currentPrice <= takeProfit) {
-          newStatus  = "TARGET_HIT";
+          newStatus   = "TARGET_HIT";
           closedPrice = takeProfit;
           pnlPoints   = +(entryPrice - takeProfit).toFixed(2);
         } else if (currentPrice >= stopLoss) {
-          newStatus  = "STOP_HIT";
+          newStatus   = "STOP_HIT";
           closedPrice = stopLoss;
           pnlPoints   = +(entryPrice - stopLoss).toFixed(2);
         }
@@ -54,12 +61,7 @@ async function checkRunningTrades() {
       if (newStatus && closedPrice !== null && pnlPoints !== null) {
         await db
           .update(signalsTable)
-          .set({
-            tradeStatus: newStatus,
-            closedPrice,
-            closedAt: new Date(),
-            pnlPoints,
-          })
+          .set({ tradeStatus: newStatus, closedPrice, closedAt: new Date(), pnlPoints })
           .where(eq(signalsTable.id, id));
 
         logger.info({ id, signal, newStatus, closedPrice, pnlPoints }, "Trade outcome updated");
@@ -73,6 +75,5 @@ async function checkRunningTrades() {
 export function startTradeTracker() {
   logger.info("Trade tracker started (10s interval)");
   setInterval(checkRunningTrades, TRACKER_INTERVAL);
-  // Run once immediately at startup
   checkRunningTrades().catch(() => {});
 }

@@ -12,7 +12,7 @@ import {
   detectOrderBlocks,
   type OrderBlock,
 } from "./technicalIndicators.js";
-import { getAnalyticsSummary, isSmartMode } from "./performanceAnalytics.js";
+import { getAnalyticsSummary, isSmartMode, getAdaptiveWeights } from "./performanceAnalytics.js";
 import { logger } from "./logger.js";
 
 export interface OrderBlockInfo {
@@ -71,8 +71,7 @@ const SIGNAL_CACHE_TTL   = 60_000;
 const COOLDOWN_MS        = 300_000;
 const MIN_PRICE_MOVE_PCT = 0.001;
 
-// ── SMC Confidence Scoring ─────────────────────────────────────────────────
-// Weights: Structure 25 + BOS 25 + Liquidity Sweep 20 + Order Block 15 + RSI/MACD 15 = 100
+// ── SMC Confidence Scoring using adaptive weights ─────────────────────────
 function calcSmcConfidence(opts: {
   structureAligned: boolean;
   bosConfirmed:     boolean;
@@ -86,30 +85,32 @@ function calcSmcConfidence(opts: {
   const { structureAligned, bosConfirmed, liquiditySweep, inOrderBlock,
           rsi, macdBullish, macdBearish, signal } = opts;
 
+  // Pull latest adaptive weights (updated by analytics every 30s)
+  const w = getAdaptiveWeights();
+
   let score = 0;
 
-  // 1. Market structure alignment (25 pts)
-  if (structureAligned) score += 25;
+  // 1. Market structure alignment
+  if (structureAligned) score += w.structure;
 
-  // 2. Break of Structure confirmed (25 pts)
-  if (bosConfirmed) score += 25;
+  // 2. Break of Structure confirmed
+  if (bosConfirmed) score += w.bos;
 
-  // 3. Liquidity sweep present (20 pts)
-  if (liquiditySweep) score += 20;
+  // 3. Liquidity sweep present
+  if (liquiditySweep) score += w.liquidity;
 
-  // 4. Price in Order Block zone (15 pts)
-  if (inOrderBlock) score += 15;
+  // 4. Price in Order Block zone
+  if (inOrderBlock) score += w.orderBlock;
 
-  // 5. RSI + MACD filter (15 pts total)
+  // 5. RSI + MACD filter
   const rsiOk = signal === "LONG"
-    ? rsi >= 30 && rsi <= 65    // not overbought, some upward room
-    : rsi >= 35 && rsi <= 70;   // not oversold, some downward room
-
+    ? rsi >= 30 && rsi <= 65
+    : rsi >= 35 && rsi <= 70;
   const macdOk = signal === "LONG" ? macdBullish : macdBearish;
 
-  if (rsiOk && macdOk)  score += 15;
-  else if (rsiOk)       score += 10;
-  else if (macdOk)      score += 7;
+  if (rsiOk && macdOk)  score += w.rsiMacd;
+  else if (rsiOk)       score += Math.round(w.rsiMacd * 0.67);
+  else if (macdOk)      score += Math.round(w.rsiMacd * 0.47);
 
   return Math.min(100, score);
 }

@@ -263,6 +263,24 @@ export interface TradeRecord {
   timestamp: string;
 }
 
+export interface ConditionAccuracy {
+  label: string;
+  key: string;
+  tradeCount: number;
+  winRate: number;
+  contribution: string;  // "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT"
+}
+
+export interface AdaptiveWeights {
+  structure:  number;
+  bos:        number;
+  liquidity:  number;
+  orderBlock: number;
+  rsiMacd:    number;
+  dataPoints: number;
+  adapted:    boolean;
+}
+
 export interface AnalyticsResponse {
   /** Total completed trades */
   totalCompleted: number;
@@ -282,6 +300,14 @@ export interface AnalyticsResponse {
   smartModeStatus: string;
   learningStatus: string;
   sufficientData: boolean;
+  /** Per-condition accuracy breakdown */
+  conditionAccuracy: ConditionAccuracy[];
+  /** Adaptive weights driven by historical performance */
+  adaptiveWeights: AdaptiveWeights;
+  /** Current streak: positive = wins, negative = losses */
+  streak: number;
+  /** Recent 5-trade trend */
+  recentTrend: string;  // "HOT" | "COLD" | "STABLE" | "LEARNING"
 }
 
 export interface ErrorResponse {
