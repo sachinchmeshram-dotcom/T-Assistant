@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "qhcl6c5mYrJCPF-oFhgOO"
+uri = "file://artifacts/gold-swing-mobile/assets/images/icon.png"
+type = "image"
+title = "generated_image"
