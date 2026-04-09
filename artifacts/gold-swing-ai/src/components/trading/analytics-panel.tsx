@@ -37,7 +37,7 @@ function MLModelCard({ status, trainedOn, accuracy }: {
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-0.5">
-          <span className="text-xs font-semibold text-foreground">Neural Network</span>
+          <span className="text-xs font-semibold text-foreground">LSTM Model</span>
           <span className={`text-[10px] font-mono font-bold ${
             isTrained  ? "text-violet-400" :
             isTraining ? "text-amber-400"  :

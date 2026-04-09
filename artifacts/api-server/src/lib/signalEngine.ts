@@ -13,7 +13,7 @@ import {
   type OrderBlock,
 } from "./technicalIndicators.js";
 import { getAnalyticsSummary, isSmartMode, getAdaptiveWeights } from "./performanceAnalytics.js";
-import { predict, featurize, type MLPrediction, type MLModelStatus } from "./mlModel.js";
+import { predictLSTM, type LSTMPrediction, type MLModelStatus } from "./lstmModel.js";
 import { logger } from "./logger.js";
 
 export interface OrderBlockInfo {
@@ -154,7 +154,7 @@ interface HybridDecision {
 function hybridDecide(opts: {
   longConf:    number;
   shortConf:   number;
-  mlPred:      MLPrediction;
+  mlPred:      LSTMPrediction;
   isRanging:   boolean;
   smartMode:   boolean;
   winRate:     number;
@@ -339,17 +339,8 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       signal: "SHORT",
     });
 
-    // ── ML Prediction ─────────────────────────────────────────────────────
-    const dominantSMCScore = Math.max(longConfidence, shortConfidence);
-    const mlFeatures = featurize({
-      marketStructure: primaryStructure,
-      bosPresent:      bosResult.bullishBOS || bosResult.bearishBOS,
-      liquiditySweep:  sweptLow || sweptHigh,
-      inOrderBlock:    inBullishOB || inBearishOB,
-      smcScore:        dominantSMCScore,
-      confidence:      dominantSMCScore,
-    });
-    const mlPred = predict(mlFeatures);
+    // ── LSTM Time-Series Prediction ────────────────────────────────────────
+    const mlPred = predictLSTM(candles1m.slice(-50));
 
     // ── Hybrid Decision ───────────────────────────────────────────────────
     const hybrid = hybridDecide({
@@ -415,17 +406,17 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
     let reason: string;
     if (finalSignal !== "HOLD") {
       const mlPart = mlPred.modelStatus === "trained"
-        ? ` · ML ${mlPred.signal === finalSignal ? "✓" : "✗"} ${mlPred.confidence}%`
+        ? ` · LSTM ${mlPred.signal === finalSignal ? "✓" : "✗"} ${mlPred.confidence}%`
         : "";
       reason = `${signalStrength} ${finalSignal} [hybrid: ${hybridConfidence}%] — SMC: ${smcConfidence}% (${smcParts.join(", ")})${mlPart}`;
     } else if (finalSignal !== hybrid.finalSignal) {
       reason = `HOLD – cooldown ${Math.ceil(cooldownRemaining / 60)}m remaining`;
     } else if (isRanging) {
-      reason = `HOLD – Sideways market (RANGING on 5m+15m) · SMC L:${longConfidence}% S:${shortConfidence}% · ML ${mlPred.signal} ${mlPred.confidence}%`;
+      reason = `HOLD – Sideways market (RANGING on 5m+15m) · SMC L:${longConfidence}% S:${shortConfidence}% · LSTM ${mlPred.signal} ${mlPred.confidence}%`;
     } else if (mlPred.modelStatus === "trained" && smcSignal === "HOLD") {
-      reason = `HOLD – SMC incomplete (L:${longConfidence}% S:${shortConfidence}%) · ML ${mlPred.signal} ${mlPred.confidence}%`;
+      reason = `HOLD – SMC incomplete (L:${longConfidence}% S:${shortConfidence}%) · LSTM ${mlPred.signal} ${mlPred.confidence}%`;
     } else if (smcSignal !== "HOLD" && signalStrength === null) {
-      reason = `HOLD – SMC ${smcSignal} ${smcConfidence}% (need ≥${SMC_SOLO_THRESHOLD}% solo or ≥${SMC_AGREE_THRESHOLD}% with ML agreement)`;
+      reason = `HOLD – SMC ${smcSignal} ${smcConfidence}% (need ≥${SMC_SOLO_THRESHOLD}% solo or ≥${SMC_AGREE_THRESHOLD}% with LSTM agreement)`;
     } else {
       reason = `HOLD – Waiting for confluence · L:${longConfidence}% S:${shortConfidence}%`;
     }
@@ -513,8 +504,8 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
   } catch (err) {
     logger.error({ err }, "Signal generation error");
     const slDist = 4;
-    const { getMLStatus } = await import("./mlModel.js");
-    const mlStatus = getMLStatus();
+    const { getLSTMStatus } = await import("./lstmModel.js");
+    const mlStatus = getLSTMStatus();
     return {
       signal: "HOLD",
       confidence: 0,

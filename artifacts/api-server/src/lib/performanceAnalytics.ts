@@ -1,6 +1,6 @@
 import { db, signalsTable } from "@workspace/db";
 import { eq, or, desc } from "drizzle-orm";
-import { getMLStatus } from "./mlModel.js";
+import { getLSTMStatus as getMLStatus } from "./lstmModel.js";
 import { logger } from "./logger.js";
 
 export interface TradeRecord {

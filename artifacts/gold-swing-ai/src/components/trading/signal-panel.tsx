@@ -228,7 +228,7 @@ export function SignalPanel() {
                 transition={{ duration: 1, ease: "easeOut" }}
               />
             </div>
-            <p className="text-[10px] text-zinc-500 text-right">60% SMC · 40% ML</p>
+            <p className="text-[10px] text-zinc-500 text-right">60% SMC · 40% LSTM</p>
           </div>
         </div>
 
@@ -246,10 +246,10 @@ export function SignalPanel() {
               <div className="text-lg text-muted-foreground/30">+</div>
             </div>
             <SignalChip
-              label="ML Signal"
+              label="LSTM Signal"
               signal={mlModelStatus === "trained" ? mlSignal : "NO_TRADE"}
               confidence={mlModelStatus === "trained" ? mlConfidence : undefined}
-              sub={mlModelStatus === "trained" ? "Neural Net" : "Not trained"}
+              sub={mlModelStatus === "trained" ? "LSTM" : "Not trained"}
             />
             <div className="flex flex-col items-center justify-center px-1 pt-4">
               <div className="text-lg text-muted-foreground/30">=</div>
@@ -259,7 +259,7 @@ export function SignalPanel() {
               signal={signal}
               confidence={hybridConfidence}
               sub={
-                signalStrength === "STRONG" ? "SMC+ML Agree" :
+                signalStrength === "STRONG" ? "SMC+LSTM Agree" :
                 signalStrength === "NORMAL" ? "SMC ≥80%" :
                 "Waiting"
               }
@@ -280,7 +280,7 @@ export function SignalPanel() {
                 mlAgrees ? "bg-emerald-400" : signal === "HOLD" ? "bg-zinc-600" : "bg-amber-400"
               }`} />
               <span className="text-[10px] text-muted-foreground">
-                ML {mlModelStatus !== "trained" ? "untrained" : mlAgrees ? "confirms" : signal !== "HOLD" ? "disagrees" : "no signal"}
+                LSTM {mlModelStatus !== "trained" ? "untrained" : mlAgrees ? "confirms" : signal !== "HOLD" ? "disagrees" : "no signal"}
               </span>
             </div>
           </div>
@@ -297,7 +297,7 @@ export function SignalPanel() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Brain className={`w-4 h-4 ${signalStrength === "STRONG" ? "text-amber-400" : "text-muted-foreground"}`} />
-              <span className="text-sm font-semibold text-foreground">Neural Network</span>
+              <span className="text-sm font-semibold text-foreground">LSTM Model</span>
               {signalStrength === "STRONG" && (
                 <Badge variant="outline" className="border-amber-500/40 bg-amber-500/15 text-amber-300 text-[10px] py-0 px-1.5">
                   CONFIRMS SIGNAL
@@ -318,7 +318,7 @@ export function SignalPanel() {
               </>
             )}
             {mlModelStatus !== "trained" && (
-              <span className="italic">Need 20+ completed trades to train</span>
+              <span className="italic">Need 15+ completed trades to train LSTM</span>
             )}
           </div>
 

@@ -5,7 +5,7 @@ import { startTradeTracker } from "../lib/tradeTracker.js";
 import { getAnalyticsSummary, setSmartMode } from "../lib/performanceAnalytics.js";
 import { priceEmitter, getLatestPrice, type LivePrice } from "../lib/priceEvents.js";
 import { broadcastToWebSocketClients } from "../lib/priceWebSocket.js";
-import { initML } from "../lib/mlModel.js";
+import { initLSTM, captureSequenceForTrade } from "../lib/lstmModel.js";
 import { db, signalsTable } from "@workspace/db";
 import { CalculatePositionSizeBody } from "@workspace/api-zod";
 import { desc } from "drizzle-orm";
@@ -14,8 +14,8 @@ import { logger } from "../lib/logger.js";
 // Start background trade outcome tracker
 startTradeTracker();
 
-// Initialise ML neural network (async — non-blocking)
-initML().catch(err => logger.error({ err }, "ML init failed"));
+// Initialise LSTM time-series model (async — non-blocking)
+initLSTM().catch(err => logger.error({ err }, "LSTM init failed"));
 
 const router: IRouter = Router();
 
@@ -86,7 +86,7 @@ router.get("/signal", async (req, res) => {
 
     if (signal.signal !== "HOLD") {
       try {
-        await db.insert(signalsTable).values({
+        const [inserted] = await db.insert(signalsTable).values({
           signal:          signal.signal,
           confidence:      signal.confidence,
           entryPrice:      signal.entryPrice,
@@ -101,7 +101,9 @@ router.get("/signal", async (req, res) => {
           liquiditySweep:  signal.liquiditySweep,
           inOrderBlock:    signal.inOrderBlock,
           smcScore:        signal.smcScore,
-        });
+        }).returning({ id: signalsTable.id });
+        // Associate the LSTM candle sequence with this trade ID
+        if (inserted?.id) captureSequenceForTrade(inserted.id);
       } catch (dbErr) {
         req.log.warn({ dbErr }, "Failed to persist signal to DB");
       }
