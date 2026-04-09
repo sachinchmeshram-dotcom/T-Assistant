@@ -1,6 +1,6 @@
 import { WebSocketServer, type WebSocket } from "ws";
 import type { Server } from "http";
-import { priceEmitter, getLatestPrice, type LivePrice } from "./priceEvents.js";
+import { priceEmitter, getLatestPrice, getTickHistory, type LivePrice } from "./priceEvents.js";
 import { logger } from "./logger.js";
 
 let wss: WebSocketServer | null = null;
@@ -11,10 +11,10 @@ export function setupWebSocketServer(server: Server) {
   wss.on("connection", (ws: WebSocket, req) => {
     logger.info({ clients: wss!.clients.size }, "WS client connected");
 
-    // Send latest price immediately on connect
-    const current = getLatestPrice();
-    if (current) {
-      ws.send(JSON.stringify(current));
+    // Send full tick history on connect so chart pre-populates instantly
+    const history = getTickHistory();
+    if (history.length > 0) {
+      ws.send(JSON.stringify({ type: "history", ticks: history }));
     }
 
     ws.on("error", (err) => {

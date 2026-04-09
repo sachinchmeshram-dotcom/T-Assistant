@@ -17,12 +17,18 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let finnhubConnected = false;
 let fallbackTimer: ReturnType<typeof setInterval> | null = null;
 
-// ── Goldprice.org fallback polling ─────────────────────────────────────────
+// Track last Finnhub tick time so fallback only fires during quiet gaps
+let lastFinnhubTickMs = 0;
+const FALLBACK_GAP_MS = 2000; // fire fallback if no Finnhub tick for 2s
+
+// ── Goldprice.org gap-filler polling ──────────────────────────────────────
+// Always runs at 2s intervals; skips if Finnhub sent a tick recently
 function startFallbackPolling() {
   if (fallbackTimer) return;
-  logger.info("Starting goldprice.org fallback polling (500ms)");
+  logger.info("Starting goldprice.org gap-filler polling (2s)");
   fallbackTimer = setInterval(async () => {
-    if (finnhubConnected) return;
+    const gap = Date.now() - lastFinnhubTickMs;
+    if (finnhubConnected && gap < FALLBACK_GAP_MS) return; // Finnhub is active
     try {
       const raw = await fetchGoldPrice();
       const live = buildLivePrice(raw, SPREAD, "goldprice");
@@ -30,15 +36,12 @@ function startFallbackPolling() {
     } catch {
       // ignore
     }
-  }, 500);
+  }, 2000);
 }
 
 function stopFallbackPolling() {
-  if (fallbackTimer) {
-    clearInterval(fallbackTimer);
-    fallbackTimer = null;
-    logger.info("Fallback polling stopped (Finnhub is live)");
-  }
+  // No-op: fallback now runs permanently as a gap-filler
+  logger.info("Finnhub is live — fallback now acting as gap-filler (2s)");
 }
 
 // ── Finnhub message handler ────────────────────────────────────────────────
@@ -77,6 +80,7 @@ function handleMessage(raw: string) {
     };
     // Override source tag
     (live as any).source = "finnhub";
+    lastFinnhubTickMs = Date.now();
     setLatestPrice(live);
     return;
   }

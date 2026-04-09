@@ -17,6 +17,7 @@ export interface StreamPrice {
 
 export interface PriceStreamState {
   data: StreamPrice | null;
+  history: StreamPrice[];
   connected: boolean;
   error: boolean;
   tickCount: number;
@@ -31,6 +32,7 @@ function buildWsUrl(): string {
 export function usePriceStream(): PriceStreamState {
   const [state, setState] = useState<PriceStreamState>({
     data: null,
+    history: [],
     connected: false,
     error: false,
     tickCount: 0,
@@ -44,7 +46,26 @@ export function usePriceStream(): PriceStreamState {
 
   const onMessage = useCallback((raw: string) => {
     try {
-      const incoming = JSON.parse(raw) as StreamPrice;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+      // History batch sent on connect
+      if (parsed["type"] === "history" && Array.isArray(parsed["ticks"])) {
+        const ticks = parsed["ticks"] as StreamPrice[];
+        if (ticks.length === 0) return;
+        const latest = ticks[ticks.length - 1];
+        setState(s => ({
+          ...s,
+          history: ticks,
+          data: latest,
+          connected: true,
+          error: false,
+          tickCount: s.tickCount + ticks.length,
+        }));
+        return;
+      }
+
+      // Regular tick
+      const incoming = parsed as unknown as StreamPrice;
       if (!incoming.price) return;
       setState(s => ({
         ...s,

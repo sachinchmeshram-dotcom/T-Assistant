@@ -17,14 +17,24 @@ export const priceEmitter = new PriceEventEmitter();
 let _latestPrice: LivePrice | null = null;
 let _prevPrice: number | null = null;
 
+// Circular tick history — last 500 ticks so new clients can pre-populate charts
+const TICK_BUFFER_SIZE = 500;
+const _tickHistory: LivePrice[] = [];
+
 export function setLatestPrice(price: LivePrice) {
   _prevPrice = _latestPrice?.price ?? null;
   _latestPrice = price;
+  _tickHistory.push(price);
+  if (_tickHistory.length > TICK_BUFFER_SIZE) _tickHistory.shift();
   priceEmitter.emit("price", price);
 }
 
 export function getLatestPrice(): LivePrice | null {
   return _latestPrice;
+}
+
+export function getTickHistory(): LivePrice[] {
+  return [..._tickHistory];
 }
 
 export function buildLivePrice(
