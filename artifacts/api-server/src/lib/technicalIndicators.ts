@@ -102,3 +102,278 @@ export function findSupportResistance(candles: OHLCCandle[], lookback = 20): {
     resistance: Math.max(...highs),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Smart Money Concept (SMC) Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SwingPoint {
+  index: number;
+  price: number;
+  type: "high" | "low";
+}
+
+export interface MarketStructureResult {
+  structure: "UPTREND" | "DOWNTREND" | "RANGING";
+  swingHighs: SwingPoint[];
+  swingLows: SwingPoint[];
+  lastHH: number | null;
+  lastHL: number | null;
+  lastLH: number | null;
+  lastLL: number | null;
+}
+
+export interface LiquidityZone {
+  price: number;
+  type: "equal_high" | "equal_low";
+  swept: boolean;
+}
+
+export interface OrderBlock {
+  type: "bullish" | "bearish";
+  high: number;
+  low: number;
+  index: number;
+  mitigated: boolean;
+}
+
+export interface BOSResult {
+  bullishBOS: boolean;
+  bearishBOS: boolean;
+  bosLevel: number | null;
+}
+
+// Internal: find pivot swing highs and lows
+function detectSwings(
+  candles: OHLCCandle[],
+  leftBars = 3,
+  rightBars = 3
+): { highs: SwingPoint[]; lows: SwingPoint[] } {
+  const highs: SwingPoint[] = [];
+  const lows: SwingPoint[] = [];
+
+  for (let i = leftBars; i < candles.length - rightBars; i++) {
+    const c = candles[i];
+
+    const isSwingHigh =
+      candles.slice(i - leftBars, i).every(l => l.high <= c.high) &&
+      candles.slice(i + 1, i + rightBars + 1).every(r => r.high < c.high);
+
+    const isSwingLow =
+      candles.slice(i - leftBars, i).every(l => l.low >= c.low) &&
+      candles.slice(i + 1, i + rightBars + 1).every(r => r.low > c.low);
+
+    if (isSwingHigh) highs.push({ index: i, price: c.high, type: "high" });
+    if (isSwingLow)  lows.push({ index: i, price: c.low,  type: "low" });
+  }
+
+  return { highs, lows };
+}
+
+// Classify market structure via HH/HL (uptrend) or LH/LL (downtrend)
+export function detectMarketStructure(candles: OHLCCandle[]): MarketStructureResult {
+  const { highs, lows } = detectSwings(candles, 3, 3);
+
+  if (highs.length < 2 || lows.length < 2) {
+    return {
+      structure: "RANGING",
+      swingHighs: highs,
+      swingLows: lows,
+      lastHH: null, lastHL: null,
+      lastLH: null, lastLL: null,
+    };
+  }
+
+  const lastHigh = highs[highs.length - 1].price;
+  const prevHigh = highs[highs.length - 2].price;
+  const lastLow  = lows[lows.length - 1].price;
+  const prevLow  = lows[lows.length - 2].price;
+
+  const isHH = lastHigh > prevHigh;
+  const isHL = lastLow  > prevLow;
+  const isLH = lastHigh < prevHigh;
+  const isLL = lastLow  < prevLow;
+
+  let structure: "UPTREND" | "DOWNTREND" | "RANGING" = "RANGING";
+  if (isHH && isHL) structure = "UPTREND";
+  else if (isLH && isLL) structure = "DOWNTREND";
+
+  return {
+    structure,
+    swingHighs: highs,
+    swingLows: lows,
+    lastHH: isHH ? lastHigh : null,
+    lastHL: isHL ? lastLow  : null,
+    lastLH: isLH ? lastHigh : null,
+    lastLL: isLL ? lastLow  : null,
+  };
+}
+
+// Find equal highs/lows within tolerance and whether they've been swept (grabbed)
+export function detectLiquidityZones(
+  candles: OHLCCandle[],
+  tolerance = 0.0012
+): LiquidityZone[] {
+  if (candles.length < 6) return [];
+
+  const { highs, lows } = detectSwings(candles, 2, 2);
+  const zones: LiquidityZone[] = [];
+
+  const last = candles[candles.length - 1];
+  const currentHigh  = last.high;
+  const currentLow   = last.low;
+  const currentClose = last.close;
+
+  // Equal highs
+  const seenHighZones = new Set<number>();
+  for (let i = 0; i < highs.length - 1; i++) {
+    for (let j = i + 1; j < highs.length; j++) {
+      const diff = Math.abs(highs[i].price - highs[j].price) / highs[i].price;
+      if (diff <= tolerance) {
+        const zonePrice = (highs[i].price + highs[j].price) / 2;
+        const key = Math.round(zonePrice * 100);
+        if (!seenHighZones.has(key)) {
+          seenHighZones.add(key);
+          const swept = currentHigh > zonePrice && currentClose < zonePrice;
+          zones.push({ price: +zonePrice.toFixed(2), type: "equal_high", swept });
+        }
+      }
+    }
+  }
+
+  // Equal lows
+  const seenLowZones = new Set<number>();
+  for (let i = 0; i < lows.length - 1; i++) {
+    for (let j = i + 1; j < lows.length; j++) {
+      const diff = Math.abs(lows[i].price - lows[j].price) / lows[i].price;
+      if (diff <= tolerance) {
+        const zonePrice = (lows[i].price + lows[j].price) / 2;
+        const key = Math.round(zonePrice * 100);
+        if (!seenLowZones.has(key)) {
+          seenLowZones.add(key);
+          const swept = currentLow < zonePrice && currentClose > zonePrice;
+          zones.push({ price: +zonePrice.toFixed(2), type: "equal_low", swept });
+        }
+      }
+    }
+  }
+
+  return zones;
+}
+
+// Detect Break of Structure — current candle closes beyond a swing high/low
+export function detectBOS(
+  candles: OHLCCandle[],
+  ms: MarketStructureResult
+): BOSResult {
+  if (candles.length < 4) {
+    return { bullishBOS: false, bearishBOS: false, bosLevel: null };
+  }
+
+  const current = candles[candles.length - 1];
+  const prev    = candles[candles.length - 2];
+
+  const lastSwingHigh = ms.swingHighs.length > 0
+    ? ms.swingHighs[ms.swingHighs.length - 1].price
+    : null;
+  const lastSwingLow = ms.swingLows.length > 0
+    ? ms.swingLows[ms.swingLows.length - 1].price
+    : null;
+
+  // BOS confirmed when this candle closes beyond the swing level AND previous candle was also pushing
+  const bullishBOS =
+    lastSwingHigh !== null &&
+    current.close > lastSwingHigh &&
+    prev.close > (lastSwingHigh * 0.9995);   // prev was near or above
+
+  const bearishBOS =
+    lastSwingLow !== null &&
+    current.close < lastSwingLow &&
+    prev.close < (lastSwingLow * 1.0005);
+
+  const bosLevel = bullishBOS ? lastSwingHigh
+    : bearishBOS ? lastSwingLow
+    : null;
+
+  return { bullishBOS, bearishBOS, bosLevel };
+}
+
+// Find the most recent unmitigated Order Blocks
+// Bullish OB = last bearish candle before a strong bullish impulse
+// Bearish OB = last bullish candle before a strong bearish impulse
+export function detectOrderBlocks(
+  candles: OHLCCandle[],
+  lookback = 40
+): { bullishOB: OrderBlock | null; bearishOB: OrderBlock | null } {
+  const n = candles.length;
+  if (n < 5) return { bullishOB: null, bearishOB: null };
+
+  const slice = candles.slice(Math.max(0, n - lookback));
+  const len = slice.length;
+  const IMPULSE_MOVE_PCT = 0.0015;
+
+  let bullishOB: OrderBlock | null = null;
+  let bearishOB: OrderBlock | null = null;
+
+  const currentClose = slice[len - 1].close;
+
+  // Scan from most recent backwards to find latest unmitigated OBs
+  for (let i = len - 3; i >= 1; i--) {
+    const c    = slice[i];
+    const next = slice[i + 1];
+    const nn   = slice[i + 2];
+
+    // ── Bullish OB ───────────────────────────────────────────────────────────
+    if (!bullishOB) {
+      const bullishImpulse =
+        next.close > next.open &&
+        nn.close   > nn.open   &&
+        (nn.close - c.low) / Math.max(c.low, 0.01) > IMPULSE_MOVE_PCT;
+
+      if (bullishImpulse && c.close < c.open) {
+        // Check if OB has been mitigated (price traded back below OB low)
+        const futureCandlesAfterOB = slice.slice(i + 1);
+        const mitigated = futureCandlesAfterOB.some(fc => fc.close < c.low);
+        if (!mitigated) {
+          const inZone = currentClose >= c.low * 0.999 && currentClose <= c.high * 1.001;
+          bullishOB = {
+            type: "bullish",
+            high: +c.high.toFixed(2),
+            low:  +c.low.toFixed(2),
+            index: i,
+            mitigated: false,
+          };
+          // If in zone, break immediately — this is our entry OB
+          if (inZone) break;
+        }
+      }
+    }
+
+    // ── Bearish OB ───────────────────────────────────────────────────────────
+    if (!bearishOB) {
+      const bearishImpulse =
+        next.close < next.open &&
+        nn.close   < nn.open   &&
+        (c.high - nn.close) / Math.max(c.high, 0.01) > IMPULSE_MOVE_PCT;
+
+      if (bearishImpulse && c.close > c.open) {
+        const futureCandlesAfterOB = slice.slice(i + 1);
+        const mitigated = futureCandlesAfterOB.some(fc => fc.close > c.high);
+        if (!mitigated) {
+          bearishOB = {
+            type: "bearish",
+            high: +c.high.toFixed(2),
+            low:  +c.low.toFixed(2),
+            index: i,
+            mitigated: false,
+          };
+          if (currentClose >= bearishOB.low * 0.999 && currentClose <= bearishOB.high * 1.001) break;
+        }
+      }
+    }
+
+    if (bullishOB && bearishOB) break;
+  }
+
+  return { bullishOB, bearishOB };
+}

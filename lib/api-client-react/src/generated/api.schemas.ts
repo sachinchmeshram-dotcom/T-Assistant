@@ -91,6 +91,29 @@ export interface Indicators {
   trend5m: IndicatorsTrend5m;
 }
 
+export type SignalResponseMarketStructure =
+  (typeof SignalResponseMarketStructure)[keyof typeof SignalResponseMarketStructure];
+
+export const SignalResponseMarketStructure = {
+  UPTREND:   "UPTREND",
+  DOWNTREND: "DOWNTREND",
+  RANGING:   "RANGING",
+} as const;
+
+export type SignalResponseLiquiditySweepType =
+  (typeof SignalResponseLiquiditySweepType)[keyof typeof SignalResponseLiquiditySweepType];
+
+export const SignalResponseLiquiditySweepType = {
+  equal_high: "equal_high",
+  equal_low:  "equal_low",
+} as const;
+
+export interface SignalOrderBlock {
+  type: "bullish" | "bearish";
+  high: number;
+  low:  number;
+}
+
 export interface SignalResponse {
   /** AI trading signal */
   signal: SignalResponseSignal;
@@ -115,6 +138,22 @@ export interface SignalResponse {
   /** Whether Smart Mode is currently active */
   smartMode: boolean;
   indicators: Indicators;
+  /** SMC market structure classification */
+  marketStructure: SignalResponseMarketStructure;
+  /** Whether a Break of Structure has been confirmed */
+  bos: boolean;
+  /** Price level of the BOS (if any) */
+  bosLevel: number | null;
+  /** Whether a liquidity sweep was detected */
+  liquiditySweep: boolean;
+  /** Type of liquidity swept (equal_high or equal_low) */
+  liquiditySweepType: SignalResponseLiquiditySweepType | null;
+  /** The active Order Block zone (if found) */
+  orderBlock: SignalOrderBlock | null;
+  /** Whether current price is inside the Order Block */
+  inOrderBlock: boolean;
+  /** Raw SMC confluence score (0-100) */
+  smcScore: number;
 }
 
 export type HistoryEntrySignal =
