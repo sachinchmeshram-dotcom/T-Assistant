@@ -14,7 +14,7 @@ function splitPrice(price: number) {
 }
 
 export function Header() {
-  const { data, connected, error } = usePriceStream();
+  const { data, connected, error, transport } = usePriceStream();
   const [flashClass, setFlashClass] = useState("");
   const prevPriceRef = useRef<number | null>(null);
   const [blinkOn, setBlinkOn] = useState(true);
@@ -77,7 +77,13 @@ export function Header() {
                   style={{ backgroundColor: blinkOn && connected ? "#22c55e" : connected ? "#16a34a" : "#ef4444" }}
                 />
                 <span className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">
-                  XAUUSD · {connected ? "LIVE" : error ? "RECONNECTING" : "CONNECTING…"}
+                  XAUUSD · {connected
+                    ? (data?.source === "polygon"
+                        ? "POLYGON · LIVE"
+                        : transport === "websocket"
+                          ? "WS · LIVE"
+                          : "LIVE")
+                    : error ? "RECONNECTING" : "CONNECTING…"}
                 </span>
               </div>
             </div>

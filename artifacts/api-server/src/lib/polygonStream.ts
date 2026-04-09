@@ -5,8 +5,8 @@ import { logger } from "./logger.js";
 
 const SPREAD = 0.35;
 const POLYGON_WS_URL = "wss://socket.polygon.io/forex";
-const RECONNECT_DELAY_BASE = 3_000;
-const RECONNECT_DELAY_MAX  = 60_000;
+const RECONNECT_DELAY_BASE = 10_000; // Start at 10s — avoid rapid-fire loops
+const RECONNECT_DELAY_MAX  = 300_000; // Cap at 5 min if Polygon plan doesn't support forex
 
 let ws: WebSocket | null = null;
 let reconnectDelay = RECONNECT_DELAY_BASE;
