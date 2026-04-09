@@ -116,7 +116,12 @@ const sweepColor = (on?: boolean) => on ? "text-cyan-400"  : "text-zinc-600";
 // ── Main Component ────────────────────────────────────────────────────────────
 export function SignalPanel() {
   const { data: signalData, isLoading, isError } = useGetSignal({
-    query: { refetchInterval: 300000 }
+    query: {
+      refetchInterval: 30000,          // poll every 30 s (backend cache is 60 s)
+      refetchIntervalInBackground: true, // keep polling even when tab is in background
+      refetchOnWindowFocus: true,        // immediate refresh when tab gains focus
+      staleTime: 25000,                  // consider data stale after 25 s
+    }
   });
 
   if (isLoading) {
