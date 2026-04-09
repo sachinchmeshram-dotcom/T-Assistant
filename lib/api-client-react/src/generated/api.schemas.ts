@@ -114,6 +114,9 @@ export interface SignalOrderBlock {
   low:  number;
 }
 
+export type MLSignal      = "LONG" | "SHORT" | "NO_TRADE";
+export type MLModelStatus = "trained" | "training" | "untrained";
+
 export interface SignalResponse {
   /** AI trading signal */
   signal: SignalResponseSignal;
@@ -154,6 +157,25 @@ export interface SignalResponse {
   inOrderBlock: boolean;
   /** Raw SMC confluence score (0-100) */
   smcScore: number;
+  // ── ML Neural Network fields ─────────────────────────────────────────────
+  /** Neural network predicted direction */
+  mlSignal:      MLSignal;
+  /** NN confidence in winning class (0-100) */
+  mlConfidence:  number;
+  /** Probability of LONG outcome (0-100) */
+  mlPLong:       number;
+  /** Probability of SHORT outcome (0-100) */
+  mlPShort:      number;
+  /** Probability of NO_TRADE / loss outcome (0-100) */
+  mlPNoTrade:    number;
+  /** Current model state */
+  mlModelStatus: MLModelStatus;
+  /** Number of samples the model was trained on */
+  mlTrainedOn:   number;
+  /** Last validation accuracy % */
+  mlAccuracy:    number;
+  /** True when ML is driving the final signal (confidence ≥ 65%) */
+  mlEnabled:     boolean;
 }
 
 export type HistoryEntrySignal =
@@ -308,6 +330,12 @@ export interface AnalyticsResponse {
   streak: number;
   /** Recent 5-trade trend */
   recentTrend: string;  // "HOT" | "COLD" | "STABLE" | "LEARNING"
+  /** Neural network model status */
+  mlModelStatus: MLModelStatus;
+  /** Number of samples the model was trained on */
+  mlTrainedOn: number;
+  /** Last validation accuracy % */
+  mlAccuracy: number;
 }
 
 export interface ErrorResponse {

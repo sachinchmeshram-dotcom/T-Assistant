@@ -13,6 +13,7 @@ import {
   type OrderBlock,
 } from "./technicalIndicators.js";
 import { getAnalyticsSummary, isSmartMode, getAdaptiveWeights } from "./performanceAnalytics.js";
+import { predict, featurize, type MLPrediction, type MLModelStatus } from "./mlModel.js";
 import { logger } from "./logger.js";
 
 export interface OrderBlockInfo {
@@ -55,6 +56,16 @@ export interface SignalResult {
     trend15m: "BULLISH" | "BEARISH" | "NEUTRAL";
     trend5m:  "BULLISH" | "BEARISH" | "NEUTRAL";
   };
+  // ── ML Neural Network fields ──────────────────────────────────────────────
+  mlSignal:      "LONG" | "SHORT" | "NO_TRADE";
+  mlConfidence:  number;   // 0-100
+  mlPLong:       number;   // class probability 0-100
+  mlPShort:      number;
+  mlPNoTrade:    number;
+  mlModelStatus: MLModelStatus;
+  mlTrainedOn:   number;
+  mlAccuracy:    number;
+  mlEnabled:     boolean;  // true = ML is driving the final signal
 }
 
 interface LastSignalState {
@@ -226,10 +237,7 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       currentPrice >= bearishOB.low * 0.9985 &&
       currentPrice <= bearishOB.high * 1.0015;
 
-    // ── SMC Signal Logic ─────────────────────────────────────────────────────
-    // LONG: uptrend structure + swept low (liquidity grab) + bullish BOS + bullish OB
-    // SHORT: downtrend structure + swept high (liquidity grab) + bearish BOS + bearish OB
-
+    // ── SMC Confidence scores (used as ML features + fallback) ───────────────
     const longStructure  = primaryStructure === "UPTREND" || contextStructure === "UPTREND";
     const shortStructure = primaryStructure === "DOWNTREND" || contextStructure === "DOWNTREND";
 
@@ -255,19 +263,35 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
       signal: "SHORT",
     });
 
-    // Pick the dominant side
+    // ── ML Neural Network prediction ─────────────────────────────────────────
+    const dominantSMCScore = Math.max(longConfidence, shortConfidence);
+    const mlFeatures = featurize({
+      marketStructure: primaryStructure,
+      bosPresent:      bosResult.bullishBOS || bosResult.bearishBOS,
+      liquiditySweep:  sweptLow || sweptHigh,
+      inOrderBlock:    inBullishOB || inBearishOB,
+      smcScore:        dominantSMCScore,
+      confidence:      dominantSMCScore,
+    });
+    const mlPred = predict(mlFeatures);
+
+    // ── Signal decision: ML drives when trained + confident, else SMC fallback
     let rawSignal: "LONG" | "SHORT" | "HOLD" = "HOLD";
     let confidence = 0;
+    let mlDriving  = false;
 
-    if (longConfidence >= MIN_CONFIDENCE && longConfidence > shortConfidence + 5) {
+    if (mlPred.enabled && mlPred.signal !== "NO_TRADE") {
+      rawSignal  = mlPred.signal;
+      confidence = mlPred.confidence;
+      mlDriving  = true;
+    } else if (longConfidence >= MIN_CONFIDENCE && longConfidence > shortConfidence + 5) {
       rawSignal  = "LONG";
       confidence = longConfidence;
     } else if (shortConfidence >= MIN_CONFIDENCE && shortConfidence > longConfidence + 5) {
       rawSignal  = "SHORT";
       confidence = shortConfidence;
     } else {
-      // Show the higher of the two for HOLD
-      confidence = Math.max(longConfidence, shortConfidence);
+      confidence = dominantSMCScore;
     }
 
     // ── Cooldown guard ────────────────────────────────────────────────────────
@@ -320,11 +344,14 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
 
     let reason: string;
     if (finalSignal !== "HOLD") {
-      reason = `${finalSignal} (SMC ${confidence}%): ${smcParts.join(" · ")}`;
+      const driver = mlDriving ? `ML ${confidence}%` : `SMC ${confidence}%`;
+      reason = `${finalSignal} (${driver}): ${smcParts.join(" · ")}`;
     } else if (rawSignal !== "HOLD" && inCooldown) {
       reason = `HOLD – cooldown ${Math.ceil(cooldownRemaining / 60)}m remaining`;
     } else if (smartMode && analytics.sufficientData && analytics.winRate < 60) {
-      reason = `HOLD – Smart Mode STRICT (win rate ${analytics.winRate}%): need SMC confluence ≥${MIN_CONFIDENCE}% (LONG:${longConfidence}% SHORT:${shortConfidence}%)`;
+      reason = `HOLD – Smart Mode STRICT (win rate ${analytics.winRate}%): need confidence ≥${MIN_CONFIDENCE}% (LONG:${longConfidence}% SHORT:${shortConfidence}%)`;
+    } else if (mlPred.modelStatus === "trained") {
+      reason = `HOLD – ML: ${mlPred.pLong}% LONG / ${mlPred.pShort}% SHORT / ${mlPred.pNoTrade}% NO TRADE (need ≥65% to trigger)`;
     } else {
       reason = `HOLD – SMC conditions incomplete (LONG:${longConfidence}% SHORT:${shortConfidence}%, need ≥${MIN_CONFIDENCE}%)`;
     }
@@ -391,6 +418,16 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
         trend15m: trend5m,
         trend5m:  trend1m,
       },
+      // ML Neural Network fields
+      mlSignal:      mlPred.signal,
+      mlConfidence:  mlPred.confidence,
+      mlPLong:       mlPred.pLong,
+      mlPShort:      mlPred.pShort,
+      mlPNoTrade:    mlPred.pNoTrade,
+      mlModelStatus: mlPred.modelStatus,
+      mlTrainedOn:   mlPred.trainedOn,
+      mlAccuracy:    mlPred.accuracy,
+      mlEnabled:     mlDriving,
     };
 
     cachedSignal = result;
@@ -399,6 +436,8 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
   } catch (err) {
     logger.error({ err }, "Signal generation error");
     const slDist = 4;
+    const { getMLStatus } = await import("./mlModel.js");
+    const mlStatus = getMLStatus();
     return {
       signal: "HOLD",
       confidence: 0,
@@ -424,6 +463,15 @@ export async function generateSignal(currentPrice: number): Promise<SignalResult
         macdLine: 0, macdSignal: 0, macdHistogram: 0, atr: 3,
         trend1h: "NEUTRAL", trend15m: "NEUTRAL", trend5m: "NEUTRAL",
       },
+      mlSignal:      "NO_TRADE",
+      mlConfidence:  0,
+      mlPLong:       34,
+      mlPShort:      33,
+      mlPNoTrade:    33,
+      mlModelStatus: mlStatus.mlModelStatus,
+      mlTrainedOn:   mlStatus.mlTrainedOn,
+      mlAccuracy:    mlStatus.mlAccuracy,
+      mlEnabled:     false,
     };
   }
 }

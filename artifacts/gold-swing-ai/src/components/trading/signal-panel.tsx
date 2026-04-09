@@ -1,4 +1,5 @@
 import { useGetSignal } from "@workspace/api-client-react";
+import type { MLModelStatus } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,11 +9,54 @@ import {
   AlertCircle, Target, ShieldX, ArrowRightCircle,
   TrendingUp, TrendingDown, Minus, Zap,
   Waves, BarChart3, BoxSelect, ArrowUpFromLine, ArrowDownFromLine,
+  Brain, Cpu, RefreshCw,
 } from "lucide-react";
 import { CooldownTimer } from "./cooldown-timer";
 import { motion } from "framer-motion";
 
-// Colour helpers
+// ── ML helper components ─────────────────────────────────────────────────────
+function MLStatusBadge({ status }: { status?: MLModelStatus }) {
+  if (status === "trained")  return (
+    <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-[10px] py-0 px-1.5">
+      <Cpu className="w-2.5 h-2.5 mr-0.5" /> TRAINED
+    </Badge>
+  );
+  if (status === "training") return (
+    <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-400 text-[10px] py-0 px-1.5">
+      <RefreshCw className="w-2.5 h-2.5 mr-0.5 animate-spin" /> TRAINING
+    </Badge>
+  );
+  return (
+    <Badge variant="outline" className="border-zinc-500/30 bg-zinc-500/10 text-zinc-400 text-[10px] py-0 px-1.5">
+      COLD START
+    </Badge>
+  );
+}
+
+function ProbBar({
+  label, value, color, isWinner,
+}: { label: string; value: number; color: string; isWinner: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`text-[10px] font-mono w-16 flex-shrink-0 ${isWinner ? "text-foreground font-bold" : "text-muted-foreground"}`}>
+        {label}
+      </span>
+      <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
+        <motion.div
+          className={`h-2 rounded-full ${color}`}
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        />
+      </div>
+      <span className={`text-[10px] font-mono w-8 text-right flex-shrink-0 ${isWinner ? "text-foreground font-bold" : "text-muted-foreground"}`}>
+        {value}%
+      </span>
+    </div>
+  );
+}
+
+// ── Colour helpers ───────────────────────────────────────────────────────────
 const structureColor = (s?: string) => {
   if (s === "UPTREND")   return "text-emerald-400";
   if (s === "DOWNTREND") return "text-red-400";
@@ -64,7 +108,14 @@ export function SignalPanel() {
     // SMC fields
     marketStructure, bos, bosLevel, liquiditySweep, liquiditySweepType,
     orderBlock, inOrderBlock, smcScore,
+    // ML neural network fields
+    mlSignal, mlConfidence, mlPLong, mlPShort, mlPNoTrade,
+    mlModelStatus, mlTrainedOn, mlAccuracy, mlEnabled,
   } = signalData;
+
+  // Determine which class is the ML winner
+  const mlWinner = mlPLong >= mlPShort && mlPLong >= mlPNoTrade ? "LONG"
+    : mlPShort >= mlPLong  && mlPShort >= mlPNoTrade ? "SHORT" : "NO_TRADE";
 
   const signalColors = {
     LONG:  "bg-success text-success-foreground shadow-[0_0_30px_rgba(34,197,94,0.3)] border-success/50",
@@ -126,6 +177,86 @@ export function SignalPanel() {
               <p className="text-xs text-zinc-500 mt-1 text-right">Need ≥60% to trigger</p>
             )}
           </div>
+        </div>
+
+        {/* ── ML Neural Network Prediction ───────────────────────────────── */}
+        <div className={`rounded-2xl border p-4 flex flex-col gap-3 transition-all duration-300 ${
+          mlEnabled
+            ? "border-violet-500/30 bg-violet-500/5"
+            : mlModelStatus === "trained"
+            ? "border-white/10 bg-black/20"
+            : "border-white/5 bg-black/10"
+        }`}>
+          {/* Header row */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Brain className={`w-4 h-4 ${mlEnabled ? "text-violet-400" : "text-muted-foreground"}`} />
+              <span className="text-sm font-semibold text-foreground">Neural Network</span>
+              {mlEnabled && (
+                <Badge variant="outline" className="border-violet-500/40 bg-violet-500/15 text-violet-300 text-[10px] py-0 px-1.5 ml-1">
+                  DRIVING SIGNAL
+                </Badge>
+              )}
+            </div>
+            <MLStatusBadge status={mlModelStatus} />
+          </div>
+
+          {/* Training info row */}
+          <div className="flex items-center gap-3 text-[10px] text-muted-foreground/70">
+            <span>{mlTrainedOn ?? 0} training samples</span>
+            {mlAccuracy > 0 && (
+              <>
+                <span className="text-white/10">·</span>
+                <span className={mlAccuracy >= 60 ? "text-emerald-400/70" : "text-amber-400/70"}>
+                  {mlAccuracy}% val accuracy
+                </span>
+              </>
+            )}
+            {mlModelStatus !== "trained" && (
+              <span className="italic">Need 20+ completed trades to train</span>
+            )}
+          </div>
+
+          {/* Probability bars */}
+          <div className="flex flex-col gap-2">
+            <ProbBar
+              label="LONG"
+              value={mlPLong ?? 34}
+              color="bg-emerald-500"
+              isWinner={mlWinner === "LONG"}
+            />
+            <ProbBar
+              label="SHORT"
+              value={mlPShort ?? 33}
+              color="bg-red-500"
+              isWinner={mlWinner === "SHORT"}
+            />
+            <ProbBar
+              label="NO TRADE"
+              value={mlPNoTrade ?? 33}
+              color="bg-zinc-500"
+              isWinner={mlWinner === "NO_TRADE"}
+            />
+          </div>
+
+          {/* ML confidence display */}
+          {mlModelStatus === "trained" && (
+            <div className="flex items-center justify-between pt-1 border-t border-white/5">
+              <span className="text-[10px] text-muted-foreground">ML Confidence</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-bold font-mono ${
+                  mlConfidence >= 80 ? "text-emerald-400" :
+                  mlConfidence >= 65 ? "text-violet-400"  :
+                  "text-zinc-400"
+                }`}>
+                  {mlConfidence}%
+                </span>
+                <span className="text-[10px] text-muted-foreground/50">
+                  {mlConfidence >= 65 ? "≥65% threshold ✓" : "<65% threshold"}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── SMC Confluence Strip ───────────────────────────────────────── */}

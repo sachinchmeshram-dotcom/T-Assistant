@@ -38,30 +38,44 @@ artifacts-monorepo/
 
 ## Gold Swing AI Pro App
 
-A professional XAUUSD gold swing trading dashboard with:
+A professional XAUUSD gold scalping dashboard with:
 
-- **Live price feed** from Yahoo Finance (GC=F) with 30s refresh
-- **AI Signal Engine**: BUY/SELL/HOLD with confidence scoring (only shows if ≥65%)
-- **Multi-timeframe analysis**: 1D, 4H, 1H trend detection using EMA50/EMA200
-- **Technical indicators**: RSI(14), EMA20/50/200, MACD, ATR(14)
-- **Signal cooldown**: 30-minute cooldown, only fires new signal if opposite appears or price moves 0.5%
-- **Position Sizer**: lot size calculator from balance + risk %
-- **Signal History**: last 50 signals stored in DB
-- **TradingView chart** with 15m/1H/4H/1D timeframes
+- **Live price feed** via Finnhub WebSocket (`OANDA:XAU_USD`), goldprice.org as gap-filler
+- **Candlestick tick chart** (lightweight-charts v5) + TradingView OHLC chart
+- **SMC Signal Engine**: Smart Money Concepts (market structure HH/HL/LH/LL, BOS, liquidity sweeps, order blocks)
+- **Self-learning analytics**: per-condition win rate tracking, adaptive weights (±8 pts), Smart Mode
+- **Pure-TS Neural Network**: 6→24→12→3 dense net trained on completed trade outcomes (Adam optimizer), runs entirely in Node.js with zero native dependencies; saves/loads weights from `/tmp/gold-ai-model.json`
+  - Min 20 closed trades to train; retrains every 50 new trades
+  - ML drives signal at ≥65% confidence; SMC fallback when untrained/low-confidence
+- **Technical indicators**: RSI(14), EMA9/21/50/200, MACD, ATR(1m)
+- **Multi-timeframe trend**: 1H/15m/5m
+- **Signal cooldown**: 5-min scalping cooldown
+- **Signal History + Trade Tracker**: auto-closes trades on TP/SL hit, tracks P&L
+
+### Neural Network (`artifacts/api-server/src/lib/mlModel.ts`)
+- Architecture: 6 inputs → 24 hidden (ReLU) → 12 hidden (ReLU) → 3 outputs (Softmax)
+- Labels: 0=LONG success, 1=SHORT success, 2=STOP_HIT
+- Features: `[structure(-1/0/1), bos, liquiditySweep, inOrderBlock, smcScore/100, confidence/100]`
+- Optimizer: Adam (lr=0.005, β1=0.9, β2=0.999); 200 epochs, batch=32, 80/20 val split
+- **No TF.js** — pure TypeScript matrix math; works on any Node.js version
 
 ### API Endpoints
 - `GET /api/price` - live XAUUSD price
-- `GET /api/signal` - AI-generated signal
-- `GET /api/history` - last 50 signals
-- `POST /api/position-size` - lot size calculator
+- `WS  /api/price/ws` - WebSocket real-time tick stream
+- `GET /api/signal` - SMC + ML AI signal
+- `GET /api/analytics` - performance analytics + ML model status
+- `GET /api/history` - signal history
+- `POST /api/trade/close/:id` - close open trade
 
 ### Key Files
-- `artifacts/api-server/src/lib/goldPrice.ts` - price fetcher (Yahoo Finance)
-- `artifacts/api-server/src/lib/technicalIndicators.ts` - RSI, EMA, MACD, ATR
-- `artifacts/api-server/src/lib/signalEngine.ts` - AI signal generation logic
-- `artifacts/api-server/src/routes/trading.ts` - API route handlers
-- `artifacts/gold-swing-ai/src/pages/dashboard.tsx` - main dashboard page
-- `lib/db/src/schema/signals.ts` - signals DB table
+- `artifacts/api-server/src/lib/mlModel.ts` - pure-TS neural network
+- `artifacts/api-server/src/lib/signalEngine.ts` - SMC + ML signal generation
+- `artifacts/api-server/src/lib/performanceAnalytics.ts` - self-learning analytics
+- `artifacts/api-server/src/lib/tradeTracker.ts` - auto trade close + ML retrain
+- `artifacts/api-server/src/lib/priceEvents.ts` - Finnhub WS + tick buffer
+- `artifacts/gold-swing-ai/src/components/trading/signal-panel.tsx` - signal + NN display
+- `artifacts/gold-swing-ai/src/components/trading/analytics-panel.tsx` - analytics + ML card
+- `lib/db/src/schema/signals.ts` - signals table (SMC fields: marketStructure, bosPresent, etc.)
 
 ## TypeScript & Composite Projects
 

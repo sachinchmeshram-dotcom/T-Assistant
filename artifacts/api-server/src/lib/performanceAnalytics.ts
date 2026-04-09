@@ -1,5 +1,6 @@
 import { db, signalsTable } from "@workspace/db";
 import { eq, or, desc } from "drizzle-orm";
+import { getMLStatus } from "./mlModel.js";
 import { logger } from "./logger.js";
 
 export interface TradeRecord {
@@ -53,11 +54,14 @@ export interface AnalyticsSummary {
   smartModeStatus: string;
   learningStatus: string;
   sufficientData: boolean;
-  // New fields
   conditionAccuracy: ConditionAccuracy[];
   adaptiveWeights: AdaptiveWeights;
-  streak: number;         // positive = win streak, negative = loss streak
+  streak: number;
   recentTrend: "HOT" | "COLD" | "STABLE" | "LEARNING";
+  // ML neural network model status
+  mlModelStatus: "trained" | "training" | "untrained";
+  mlTrainedOn:   number;
+  mlAccuracy:    number;
 }
 
 // ── Base SMC weights ────────────────────────────────────────────────────────
@@ -337,6 +341,7 @@ export async function getAnalyticsSummary(forceRefresh = false): Promise<Analyti
       adaptiveWeights,
       streak,
       recentTrend,
+      ...getMLStatus(),
     };
 
     cachedAnalytics = result;
@@ -355,6 +360,7 @@ export async function getAnalyticsSummary(forceRefresh = false): Promise<Analyti
       adaptiveWeights: { ...BASE_WEIGHTS },
       streak: 0,
       recentTrend: "LEARNING",
+      ...getMLStatus(),
     };
   }
 }

@@ -2,6 +2,7 @@ import { db, signalsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { getLatestPrice } from "./priceEvents.js";
 import { fetchGoldPrice } from "./goldPrice.js";
+import { retrainIfNeeded } from "./mlModel.js";
 import { logger } from "./logger.js";
 
 const TRACKER_INTERVAL = 10_000; // 10 seconds
@@ -65,6 +66,9 @@ async function checkRunningTrades() {
           .where(eq(signalsTable.id, id));
 
         logger.info({ id, signal, newStatus, closedPrice, pnlPoints }, "Trade outcome updated");
+
+        // Trigger ML retraining check after each trade closes
+        retrainIfNeeded().catch(err => logger.warn({ err }, "ML retrain check failed"));
       }
     }
   } catch (err) {

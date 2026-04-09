@@ -4,12 +4,60 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import {
   Brain, Zap, BarChart3, Waves, BoxSelect, TrendingUp,
-  Flame, Snowflake, Activity, Info,
+  Flame, Snowflake, Activity, Info, Cpu, RefreshCw,
 } from "lucide-react";
-import type { ConditionAccuracy, AdaptiveWeights } from "@workspace/api-client-react";
+import type { ConditionAccuracy, AdaptiveWeights, MLModelStatus } from "@workspace/api-client-react";
 
 // Base weights for delta display
 const BASE_WEIGHTS = { structure: 25, bos: 25, liquidity: 20, orderBlock: 15, rsiMacd: 15 };
+
+function MLModelCard({ status, trainedOn, accuracy }: {
+  status?: MLModelStatus;
+  trainedOn?: number;
+  accuracy?: number;
+}) {
+  const isTrained  = status === "trained";
+  const isTraining = status === "training";
+
+  return (
+    <div className={`rounded-xl border p-3 flex items-center gap-3 transition-all ${
+      isTrained  ? "border-violet-500/25 bg-violet-500/5" :
+      isTraining ? "border-amber-500/25 bg-amber-500/5"  :
+      "border-white/5 bg-black/20"
+    }`}>
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+        isTrained  ? "bg-violet-500/20" :
+        isTraining ? "bg-amber-500/20"  :
+        "bg-zinc-800"
+      }`}>
+        {isTraining
+          ? <RefreshCw className="w-4 h-4 text-amber-400 animate-spin" />
+          : <Cpu className={`w-4 h-4 ${isTrained ? "text-violet-400" : "text-zinc-500"}`} />
+        }
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between mb-0.5">
+          <span className="text-xs font-semibold text-foreground">Neural Network</span>
+          <span className={`text-[10px] font-mono font-bold ${
+            isTrained  ? "text-violet-400" :
+            isTraining ? "text-amber-400"  :
+            "text-zinc-500"
+          }`}>
+            {isTrained ? "TRAINED" : isTraining ? "TRAINING…" : "COLD START"}
+          </span>
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          {isTrained
+            ? `${trainedOn ?? 0} samples · ${accuracy ?? 0}% val accuracy`
+            : isTraining
+            ? "Training in progress…"
+            : `Need 20 closed trades to train (have ${trainedOn ?? 0})`
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function WinDot({ result, pnl }: { result: "WIN" | "LOSS"; pnl: number }) {
   return (
@@ -195,6 +243,13 @@ export function AnalyticsPanel() {
             {isLoading ? "Loading…" : (data?.learningStatus ?? "Collecting data…")}
           </span>
         </div>
+
+        {/* ML Neural Network Model Status */}
+        <MLModelCard
+          status={data?.mlModelStatus}
+          trainedOn={data?.mlTrainedOn}
+          accuracy={data?.mlAccuracy}
+        />
 
         {/* Smart Mode Status */}
         {smartMode && (

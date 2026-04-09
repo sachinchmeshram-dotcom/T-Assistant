@@ -5,6 +5,7 @@ import { startTradeTracker } from "../lib/tradeTracker.js";
 import { getAnalyticsSummary, setSmartMode } from "../lib/performanceAnalytics.js";
 import { priceEmitter, getLatestPrice, type LivePrice } from "../lib/priceEvents.js";
 import { broadcastToWebSocketClients } from "../lib/priceWebSocket.js";
+import { initML } from "../lib/mlModel.js";
 import { db, signalsTable } from "@workspace/db";
 import { CalculatePositionSizeBody } from "@workspace/api-zod";
 import { desc } from "drizzle-orm";
@@ -12,6 +13,9 @@ import { logger } from "../lib/logger.js";
 
 // Start background trade outcome tracker
 startTradeTracker();
+
+// Initialise ML neural network (async — non-blocking)
+initML().catch(err => logger.error({ err }, "ML init failed"));
 
 const router: IRouter = Router();
 
