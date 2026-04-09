@@ -252,6 +252,19 @@ components:
           type: string
         tradeDuration:
           type: string
+        tradeStatus:
+          type: string
+          enum: [RUNNING, TARGET_HIT, STOP_HIT, HOLD]
+          description: Trade outcome status
+        closedPrice:
+          type: number
+          description: Price at which trade was closed (TP or SL hit)
+        closedAt:
+          type: string
+          description: ISO timestamp when trade was closed
+        pnlPoints:
+          type: number
+          description: Profit or loss in USD points
       required:
         - id
         - signal
@@ -263,6 +276,7 @@ components:
         - reason
         - timestamp
         - tradeDuration
+        - tradeStatus
     PositionSizeRequest:
       type: object
       properties:

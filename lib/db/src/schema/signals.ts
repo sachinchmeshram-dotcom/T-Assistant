@@ -11,8 +11,13 @@ export const signalsTable = pgTable("signals", {
   takeProfit: real("take_profit").notNull(),
   trend: text("trend").notNull(),
   reason: text("reason").notNull(),
-  tradeDuration: text("trade_duration").notNull().default("1-3 days"),
+  tradeDuration: text("trade_duration").notNull().default("5-15 minutes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // Trade outcome tracking
+  tradeStatus: text("trade_status").notNull().default("RUNNING"),
+  closedPrice: real("closed_price"),
+  closedAt: timestamp("closed_at"),
+  pnlPoints: real("pnl_points"),
 });
 
 export const insertSignalSchema = createInsertSchema(signalsTable).omit({ id: true, createdAt: true });

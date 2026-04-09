@@ -1,10 +1,14 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { fetchGoldPrice } from "../lib/goldPrice.js";
 import { generateSignal } from "../lib/signalEngine.js";
+import { startTradeTracker } from "../lib/tradeTracker.js";
 import { db, signalsTable } from "@workspace/db";
 import { CalculatePositionSizeBody } from "@workspace/api-zod";
 import { desc } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
+
+// Start background trade outcome tracker
+startTradeTracker();
 
 const router: IRouter = Router();
 
